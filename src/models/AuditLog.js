@@ -1,0 +1,99 @@
+import mongoose from 'mongoose';
+
+const auditLogSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    company: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Company',
+      required: true,
+    },
+    action: {
+      type: String,
+      required: [true, 'Please provide an action'],
+      enum: [
+        'user_created',
+        'user_updated',
+        'user_deleted',
+        'user_login',
+        'user_logout',
+        "user_status_updated",
+        "user_suspended",
+        "user_activated",
+        'password_changed',
+        'password_reset_requested',
+        'password_reset',
+        'profile_updated',
+        'avatar_uploaded',
+        'team_created',
+        'team_updated',
+        'team_deleted',
+        'team_member_added',
+        'team_member_removed',
+        'team_member_role_changed',
+        'company_settings_updated',
+        'company_plan_changed',
+        'company_plan_downgraded',
+        'company_plan_upgraded',
+        'company_plan_cancelled',
+        'company_plan_reactivated',
+        'company_plan_changed',
+        'api_key_generated',
+        'api_key_regenerated',
+        'api_key_deleted',
+        'two_factor_enabled',
+        'two_factor_disabled',
+        'invite_sent',
+        'invite_accepted',
+        'invite_rejected',
+        'login_failed',
+        'unauthorized_access',
+        'lead_created',
+        'api_lead_created',
+        'lead_updated',
+        'lead_deleted',
+        'lead_remark_added',
+        'lead_assigned',
+        'lead_followup_added',
+        'form_created',
+        'form_updated',
+        'form_deleted',
+      ],
+    },
+    resource: {
+      type: String,
+      default: null,
+    },
+    resourceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    changes: {
+      before: mongoose.Schema.Types.Mixed,
+      after: mongoose.Schema.Types.Mixed,
+    },
+    ipAddress: String,
+    userAgent: String,
+    status: {
+      type: String,
+      enum: ['success', 'failed', 'warning'],
+      default: 'success',
+    },
+    description: String,
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Index for efficient queries
+auditLogSchema.index({ user: 1, company: 1, createdAt: -1 });
+auditLogSchema.index({ action: 1 });
+auditLogSchema.index({ company: 1, createdAt: -1 });
+
+const AuditLog = mongoose.model('AuditLog', auditLogSchema);
+export default AuditLog;
