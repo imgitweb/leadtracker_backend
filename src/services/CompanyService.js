@@ -17,7 +17,7 @@ export class CompanyService {
     }
 
     const membersCount = await User.countDocuments({ company: companyId });
-    const leadsCount = await Lead.countDocuments({ company: companyId });
+    const leadsCount = await Lead.countDocuments({ companyId: companyId });
     
     // Add counts to object
     const companyObj = company.toObject();

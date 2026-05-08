@@ -80,7 +80,7 @@ app.use(
 
 
 // Rate limiting
-app.use('/api/', apiLimiter);
+// app.use('/api/', apiLimiter);
 
 // Audit logging
 app.use(auditLog);

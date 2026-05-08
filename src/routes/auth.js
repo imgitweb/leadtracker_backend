@@ -14,7 +14,7 @@ import {
 const router = express.Router();
 
 router.post('/register', register);
-router.post('/login', loginLimiter, login);
+router.post('/login',  login);
 router.post('/logout', protect, logout);
 router.post('/refresh-token', refreshToken);
 router.get('/me', protect, getCurrentUser);
