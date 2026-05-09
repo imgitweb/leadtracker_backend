@@ -127,6 +127,7 @@ export const getCompanyAnalytics = async (req, res) => {
 
     return sendResponse(res, 200, true, 'Analytics fetched successfully', {
       totalLeads,
+      websiteTotalLeads: totalLeads, // Assuming all leads are from website for now, can be adjusted if source field is added
       activeFormsCount,
       leadsByStatus,
       submissionsByDay,

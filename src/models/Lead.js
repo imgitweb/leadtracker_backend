@@ -13,7 +13,6 @@ const leadSchema = new mongoose.Schema(
     formId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Form",
-      required: true,
       index: true
     },
 
@@ -100,8 +99,7 @@ const leadSchema = new mongoose.Schema(
     source: {
       type: String,
       default: "Website",
-    }
-    , 
+    },
 
 
     tags: [String],

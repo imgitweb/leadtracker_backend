@@ -69,9 +69,7 @@ export const createLead = async (req, res) => {
       if (!form || form.companyId.toString() !== req.user.company._id.toString()) {
         return sendError(res, 400, 'Invalid formId for this company');
       }
-    } else {
-       return sendError(res, 400, 'formId is required');
-    }
+    } 
 
     // Helper to find common field names in dynamic data
     const findValue = (keys) => {
@@ -88,8 +86,7 @@ export const createLead = async (req, res) => {
       priority: priority || 'Medium',
       createdBy: req.user._id,
       tags,
-      source: source || (req.isApiKeyAuth ? 'API' : 'Dashboard'),
-      // Automatically extract for indexing
+      source: source || (req.isApiKeyAuth ? 'Website' : source ),
       name: findValue(['name', 'full name', 'fullname', 'username']),
       email: findValue(['email', 'email address', 'mail']),
       phone: findValue(['phone', 'mobile', 'contact', 'telephone', 'phone number'])
