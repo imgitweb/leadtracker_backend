@@ -100,18 +100,41 @@ export const checkCompanyAccess = async (req, res, next) => {
 };
 // Protect routes with API Key
 export const apiKeyProtect = async (req, res, next) => {
-  const key = req.headers['x-api-key'];
+  // Accept API key from multiple common locations to be tolerant of client variations:
+  //  - x-api-key header
+  //  - Authorization: ApiKey <key>
+  //  - Authorization: <raw_key>
+  //  - query param ?api_key=...
+  //  - request body api_key
+  let key = req.headers['x-api-key'] || req.get('x-api-key') || req.query?.api_key || req.body?.api_key;
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  if (!key && authHeader && typeof authHeader === 'string') {
+    // Common patterns: 'ApiKey sk_live_...', 'Bearer sk_live_...', or raw key
+    if (authHeader.startsWith('ApiKey ')) {
+      key = authHeader.split(' ')[1];
+    } else if (authHeader.startsWith('Bearer ')) {
+      // Some clients mistakenly use Bearer scheme for API keys
+      key = authHeader.split(' ')[1];
+    } else {
+      // Treat entire Authorization value as the key (tolerant)
+      key = authHeader;
+    }
+  }
 
   if (!key) {
     return res.status(401).json({
       success: false,
-      message: 'API Key is required in x-api-key header',
+      message: 'API Key is required (x-api-key header, Authorization header, query param or body param)',
     });
   }
 
   try {
     const keyHash = crypto.createHash('sha256').update(key).digest('hex');
     const apiKey = await ApiKey.findOne({ keyHash, isActive: true }).populate(['user', 'company']);
+
+    // Debug logs to aid troubleshooting (do not expose raw keys in logs)
+    console.log('[apiKeyProtect] keyHash:', keyHash.slice(0, 8) + '...');
+    console.log('[apiKeyProtect] apiKey found:', !!apiKey);
 
     if (!apiKey) {
       return res.status(401).json({
