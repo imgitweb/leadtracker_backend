@@ -28,6 +28,21 @@ import contactRoutes from './routes/contact.js';
 import formRoutes from './routes/forms.js';
 import analyticsRoutes from './routes/analytics.js';
 
+import instagramAuth from './routes/meta/instagramAuth.js';
+import instagramDataRoutes from './routes/meta/instagramDataRoutes.js';
+
+import facebookAuthRoutes from "./routes/meta/facebookAuthRoutes.js";
+import facebookDataRoutes from "./routes/meta/facebookDataRoutes.js";
+import facebookWebhookRoutes from "./routes/meta/facebookWebhookRoutes.js";
+
+import whatsappAuthRoutes from "./routes/meta/whatsappAuthRoutes.js";
+import whatsappDataRoutes from "./routes/meta/whatsappDataRoutes.js";
+import whatsappWebhookRoutes from "./routes/meta/whatsappWebhookRoutes.js";
+
+
+import webhookRoutes from "./routes/meta/webhookRoutes.js";
+
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -43,7 +58,7 @@ app.use(helmet({
   crossOriginResourcePolicy: false,
 }));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173' || " https://edge-labeled-prostores-york.trycloudflare.com",
   credentials: true,
 }));
 
@@ -98,6 +113,18 @@ app.use('/api/company', companyRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);
+
+app.use('/api/insta', instagramAuth);
+app.use('/api/insta-data', instagramDataRoutes);
+app.use("/api/webhook/instagram", webhookRoutes);
+
+app.use("/api/fb/auth", facebookAuthRoutes);
+app.use("/api/fb-data", facebookDataRoutes);
+app.use("/api/webhook/facebook", facebookWebhookRoutes);
+
+app.use("/api/wa/auth", whatsappAuthRoutes);
+app.use("/api/wa-data", whatsappDataRoutes);
+app.use("/api/webhook/whatsapp", whatsappWebhookRoutes);
 
 // Error handling
 app.use(notFound);
