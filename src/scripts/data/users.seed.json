@@ -1,0 +1,15 @@
+[
+  {
+    "fullName": "Aarav Admin",
+    "email": "aarav.admin@example.com",
+    "password": "Pass@12345",
+    "role": "admin",
+    "status": "active",
+    "phone": "9876543210",
+    "companyName": "Cinfy Demo Pvt Ltd",
+    "plan": "enterprise",
+    "industry": "technology",
+    "setAsCompanyOwner": true
+  }
+ 
+]
