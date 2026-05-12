@@ -1,6 +1,7 @@
 import Lead from '../models/Lead.js';
 import Company from '../models/Company.js';
 import User from '../models/User.js';
+import mongoose from 'mongoose';
 import { sendResponse, sendError } from '../utils/helpers.js';
 import AuditLog from '../models/AuditLog.js';
 import Form from '../models/Form.js';
@@ -62,34 +63,57 @@ export const createLead = async (req, res) => {
     }
 
     const { formId, data, status, priority, tags, source } = req.body;
+    const normalizedFormId = typeof formId === 'string' ? formId.trim() : formId;
+    const isApiKeyRequest = !!req.isApiKeyAuth;
 
-    // Validate Form belongs to company
-    if (formId) {
-      const form = await Form.findById(formId);
+    // API-key based lead ingestion must always include a valid formId.
+    if (isApiKeyRequest && !normalizedFormId) {
+      return sendError(res, 400, 'formId is required');
+    }
+
+    // If formId is provided (or required for API key), validate format first.
+    if (normalizedFormId) {
+      if (normalizedFormId === 'your_form_id_here' || !mongoose.Types.ObjectId.isValid(normalizedFormId)) {
+        return sendError(res, 400, isApiKeyRequest ? 'formId is required' : 'Invalid formId');
+      }
+
+      // Validate form ownership within the same company.
+      const form = await Form.findById(normalizedFormId);
       if (!form || form.companyId.toString() !== req.user.company._id.toString()) {
         return sendError(res, 400, 'Invalid formId for this company');
       }
-    } else {
-       return sendError(res, 400, 'formId is required');
     }
 
-    // Helper to find common field names in dynamic data
+    // Support both payload formats:
+    // 1) { formId, data: { ...fields } }
+    // 2) { formId, name, email, phone, ...customFields }
+    const reservedKeys = new Set(['formId', 'data', 'status', 'priority', 'tags', 'source', 'api_key']);
+    const flatData = Object.entries(req.body || {}).reduce((acc, [key, value]) => {
+      if (!reservedKeys.has(key)) acc[key] = value;
+      return acc;
+    }, {});
+
+    const normalizedData = {
+      ...(flatData || {}),
+      ...((data && typeof data === 'object' && !Array.isArray(data)) ? data : {}),
+    };
+
+    // Helper to find common field names in normalized lead data
     const findValue = (keys) => {
-      if (!data) return null;
-      const foundKey = Object.keys(data).find(k => keys.includes(k.toLowerCase()));
-      return foundKey ? data[foundKey] : null;
+      if (!normalizedData || typeof normalizedData !== 'object') return null;
+      const foundKey = Object.keys(normalizedData).find(k => keys.includes(k.toLowerCase()));
+      return foundKey ? normalizedData[foundKey] : null;
     };
 
     const leadData = {
       companyId: req.user.company._id,
-      formId,
-      data,
+      formId: normalizedFormId || undefined,
+      data: normalizedData,
       status: status || 'New',
       priority: priority || 'Medium',
       createdBy: req.user._id,
       tags,
-      source: source || (req.isApiKeyAuth ? 'API' : 'Dashboard'),
-      // Automatically extract for indexing
+      source: source || (req.isApiKeyAuth ? 'Website' : source ),
       name: findValue(['name', 'full name', 'fullname', 'username']),
       email: findValue(['email', 'email address', 'mail']),
       phone: findValue(['phone', 'mobile', 'contact', 'telephone', 'phone number'])

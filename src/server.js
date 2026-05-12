@@ -25,6 +25,7 @@ import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import companyRoutes from './routes/company.js';
 import contactRoutes from './routes/contact.js';
+import leadRoutes from './routes/lead.js';
 import formRoutes from './routes/forms.js';
 import analyticsRoutes from './routes/analytics.js';
 
@@ -95,7 +96,7 @@ app.use(
 
 
 // Rate limiting
-app.use('/api/', apiLimiter);
+// app.use('/api/', apiLimiter);
 
 // Audit logging
 app.use(auditLog);
@@ -103,13 +104,17 @@ app.use(auditLog);
 // ============ ROUTES ============
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'API is running' });
+  res.json({ status: 'API is running', 
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+   });
 });
 
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/company', companyRoutes);
+app.use('/api/lead', leadRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);

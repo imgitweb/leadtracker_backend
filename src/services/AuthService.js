@@ -41,6 +41,8 @@ export class AuthService {
     // Set company owner
     company.owner = user._id;
     company.members.push(user._id);
+    user.lastLogin = new Date();
+
 
     await user.save();
     await company.save();
