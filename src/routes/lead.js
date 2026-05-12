@@ -6,17 +6,21 @@ const router = express.Router();
 
 // Helper to allow either JWT or API Key (same behavior as contact route)
 const protectOrApiKey = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const hasApiKeyHeader = !!req.headers['x-api-key'];
+  const hasApiKeyAuthScheme = typeof authHeader === 'string' && authHeader.startsWith('ApiKey ');
+
   try {
-    const hasXApiKey = !!req.headers['x-api-key'];
-    const hasAuth = !!(req.headers.authorization || req.headers.Authorization);
-    console.log(`[protectOrApiKey:/api/lead] x-api-key present: ${hasXApiKey}, Authorization present: ${hasAuth}`);
+    const hasAuth = !!authHeader;
+    console.log(`[protectOrApiKey:/api/lead] x-api-key present: ${hasApiKeyHeader}, Authorization present: ${hasAuth}`);
   } catch (err) {
     console.log('[protectOrApiKey:/api/lead] headers inspect error', err.message);
   }
 
-  if (req.headers['x-api-key'] || (req.headers.authorization && typeof req.headers.authorization === 'string' && (req.headers.authorization.startsWith('ApiKey ') || req.headers.authorization.startsWith('Bearer ')))) {
+  if (hasApiKeyHeader || hasApiKeyAuthScheme) {
     return apiKeyProtect(req, res, next);
   }
+
   return protect(req, res, next);
 };
 
