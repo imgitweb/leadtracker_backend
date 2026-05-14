@@ -5,6 +5,7 @@ const facebookAccountSchema = new mongoose.Schema({
   page_id: { type: String, required: true, unique: true },
   page_name: { type: String, required: true },
   page_profile_picture: { type: String },
+  ai_enabled: { type: Boolean, default: false },
   access_token: { type: String, required: true }, // PAGE Access Token
 }, { timestamps: true });
 

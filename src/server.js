@@ -28,6 +28,7 @@ import contactRoutes from './routes/contact.js';
 import leadRoutes from './routes/lead.js';
 import formRoutes from './routes/forms.js';
 import analyticsRoutes from './routes/analytics.js';
+import aiRoutes from "./routes/aiRoutes.js";
 
 import instagramAuth from './routes/meta/instagramAuth.js';
 import instagramDataRoutes from './routes/meta/instagramDataRoutes.js';
@@ -118,7 +119,7 @@ app.use('/api/lead', leadRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);
-
+app.use('/api/ai', aiRoutes);
 app.use('/api/insta', instagramAuth);
 app.use('/api/insta-data', instagramDataRoutes);
 app.use("/api/webhook/instagram", webhookRoutes);

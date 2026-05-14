@@ -54,3 +54,34 @@ export const sendWaMessage = async (req, res) => {
     res.status(500).json({ error: "Failed to send WA message" });
   }
 };
+
+
+export const toggleWaConversationAI = async (req, res) => {
+  try {
+    const { convId } = req.params; // Route params se conversationId lenge
+    const { isEnabled } = req.body; // true ya false
+
+    if (typeof isEnabled !== 'boolean') {
+      return res.status(400).json({ error: "isEnabled must be a boolean value" });
+    }
+
+    const updatedConversation = await WhatsAppConversation.findByIdAndUpdate(
+      convId,
+      { ai_enabled: isEnabled },
+      { new: true } // Return updated document
+    );
+
+    if (!updatedConversation) {
+      return res.status(404).json({ error: "Conversation not found" });
+    }
+
+    res.status(200).json({ 
+      success: true, 
+      message: `AI auto-reply is now ${isEnabled ? 'ON' : 'OFF'} for this WhatsApp chat.`,
+      ai_enabled: updatedConversation.ai_enabled 
+    });
+  } catch (error) {
+    console.error("Error toggling WA conversation AI:", error);
+    res.status(500).json({ error: "Failed to toggle conversation AI settings" });
+  }
+};

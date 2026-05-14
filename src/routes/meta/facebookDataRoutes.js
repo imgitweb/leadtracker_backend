@@ -5,7 +5,8 @@ import {
   getFbMessages,
   sendFbMessage,
   updateFbConversationName,
-  clearFbMessages
+  clearFbMessages,
+  toggleFbConversationAI
 } from "../../controllers/meta/facebookDataController.js";
 import { protect } from "../../middleware/auth.js";
 
@@ -28,5 +29,7 @@ router.put('/:pageId/conversations/:conversationId', updateFbConversationName);
 
 
 router.delete('/:pageId/conversations/:conversationId/messages', clearFbMessages);
+
+router.post("/:pageId/conversations/:conversationId/toggle-ai", protect, toggleFbConversationAI);
 
 export default router;

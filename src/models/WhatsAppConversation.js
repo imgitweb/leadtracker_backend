@@ -6,6 +6,7 @@ const waConversationSchema = new mongoose.Schema({
   customer_name: { type: String, default: "WA User" },
   last_message: { type: String, default: "" },
   last_message_time: { type: Date, default: Date.now },
+  ai_enabled: { type: Boolean, default: true },
 }, { timestamps: true });
 
 export default mongoose.model("WhatsAppConversation", waConversationSchema);

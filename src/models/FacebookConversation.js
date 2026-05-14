@@ -7,6 +7,7 @@ const fbConversationSchema = new mongoose.Schema({
   customer_profile_pic: { type: String, default: "" },
   last_message: { type: String, default: "" },
   last_message_time: { type: Date, default: Date.now },
+  ai_enabled: { type: Boolean, default: true },
 }, { timestamps: true });
 
 export default mongoose.model("FacebookConversation", fbConversationSchema);
