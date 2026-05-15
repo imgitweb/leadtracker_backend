@@ -7,6 +7,7 @@ import {
   regenerateApiKey,
   deleteApiKey,
   getAuditLogs,
+  getCompanyModules,
 } from '../controllers/companyController.js';
 import { protect, authorize } from '../middleware/auth.js';
 
@@ -16,6 +17,7 @@ const router = express.Router();
 router.use(protect);
 
 router.get('/', getCompany);
+router.get('/modules', getCompanyModules);
 router.put('/', authorize('admin', 'super_admin'), updateCompany);
 
 // API Keys

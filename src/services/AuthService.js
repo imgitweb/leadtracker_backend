@@ -4,6 +4,7 @@ import { generateToken, generateRefreshToken } from '../utils/jwt.js';
 import AuditLog from '../models/AuditLog.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
+import { CompanyModuleService } from './CompanyModuleService.js';
 
 
 export class AuthService {
@@ -46,6 +47,7 @@ export class AuthService {
 
     await user.save();
     await company.save();
+    await CompanyModuleService.ensureCompanyModules(company._id, user._id);
 
     // Generate tokens
     const token = generateToken(user._id);
@@ -78,13 +80,16 @@ export class AuthService {
     const user = await User.findOne({ email }).select('+password').populate('company');
 
     if (!user) {
+      console.warn('AuthService.login: user not found for email', email);
       throw new Error('Invalid credentials');
     }
 
     // Check if password matches
     const isMatch = await user.matchPassword(password);
+    console.debug(`AuthService.login: user=${user._id} hashedPassword=${String(user.password).slice(0,8)}... isMatch=${isMatch}`);
 
     if (!isMatch) {
+      console.warn('AuthService.login: password mismatch for', email);
       throw new Error('Invalid credentials');
     }
 

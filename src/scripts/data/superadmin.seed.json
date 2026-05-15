@@ -1,0 +1,10 @@
+{
+  "fullName": "Super Admin",
+  "email": "superadmin@cinfy.com",
+  "password": "ChangeMe123!",
+  "companyName": "Cinfy Platform",
+  "plan": "enterprise",
+  "industry": "technology",
+  "website": "https://cinfy.com",
+  "description": "Platform workspace for global super admin operations."
+}

@@ -1,11 +1,21 @@
 import { CompanyService } from '../services/CompanyService.js';
 import { sendResponse, sendError } from '../utils/helpers.js';
+import { CompanyModuleService } from '../services/CompanyModuleService.js';
 
 export const getCompany = async (req, res, next) => {
   try {
     const company = await CompanyService.getCompany(req.user.company._id);
 
     sendResponse(res, 200, true, 'Company fetched successfully', { company });
+  } catch (error) {
+    sendError(res, 500, error.message, error);
+  }
+};
+
+export const getCompanyModules = async (req, res, next) => {
+  try {
+    const modules = await CompanyModuleService.getCompanyModules(req.user.company._id);
+    sendResponse(res, 200, true, 'Company modules fetched successfully', { modules });
   } catch (error) {
     sendError(res, 500, error.message, error);
   }

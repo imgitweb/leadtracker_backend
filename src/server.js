@@ -28,6 +28,8 @@ import contactRoutes from './routes/contact.js';
 import leadRoutes from './routes/lead.js';
 import formRoutes from './routes/forms.js';
 import analyticsRoutes from './routes/analytics.js';
+import superAdminRoutes from './superadmin/routes/superAdminRoutes.js';
+import { CompanyModuleService } from './services/CompanyModuleService.js';
 
 import instagramAuth from './routes/meta/instagramAuth.js';
 import instagramDataRoutes from './routes/meta/instagramDataRoutes.js';
@@ -51,6 +53,7 @@ const app = express();
 
 // Connect to database
 await connectDB();
+await CompanyModuleService.syncAllCompanies();
 
 // ============ MIDDLEWARE ============
 
@@ -118,6 +121,7 @@ app.use('/api/lead', leadRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/superadmin', superAdminRoutes);
 
 app.use('/api/insta', instagramAuth);
 app.use('/api/insta-data', instagramDataRoutes);

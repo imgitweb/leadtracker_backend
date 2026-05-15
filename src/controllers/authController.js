@@ -68,6 +68,9 @@ export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
 
+    console.log('Login attempt:', email);
+    console.log('Request body:', req.body);
+
     if (!email || !password) {
       return sendError(res, 400, 'Please provide email and password');
     }
