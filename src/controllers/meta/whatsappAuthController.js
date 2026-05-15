@@ -1,18 +1,20 @@
+import dotenv from 'dotenv';
 import axios from "axios";
 import WhatsAppAccount from "../../models/WhatsAppAccount.js";
+dotenv.config();
 
-// const APP_ID = process.env.FACEBOOK_CLIENT_ID;
-// const APP_SECRET = process.env.FACEBOOK_CLIENT_SECRET;
+const APP_ID = process.env.FACEBOOK_CLIENT_ID;
+const APP_SECRET = process.env.FACEBOOK_CLIENT_SECRET;
 
-const APP_ID = "1175088701269032";
-const APP_SECRET = "60fef6ba1770f20b048991ba65b94893";
+// const APP_ID = "1175088701269032";
+// const APP_SECRET = "60fef6ba1770f20b048991ba65b94893";
 
 
 export const handleWhatsAppCallback = async (req, res) => {
   try {
     // ✅ FIX: Frontend se ab 'code' aur 'origin' aayega
     const { code, origin } = req.body;
-    const userId = req.user._id;
+    const userId = req.user._id.toString();
 
     if (!code) return res.status(400).json({ error: "Code is required from Meta" });
 
@@ -22,7 +24,7 @@ export const handleWhatsAppCallback = async (req, res) => {
         client_id: APP_ID, 
         client_secret: APP_SECRET, 
         code: code,
-        redirect_uri: origin // Frontend ka domain yahan match hona zaroori hai
+        redirect_uri: origin
       }
     });
     

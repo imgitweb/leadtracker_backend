@@ -3,7 +3,7 @@ import { handleWhatsAppCallback, getWhatsAppStatus, unlinkWhatsAppAccount } from
 import { protect } from "../../middleware/auth.js";
 
 const router = express.Router();
-router.post("/callback", protect, handleWhatsAppCallback); // Note: POST request via frontend API
+router.post("/callback", handleWhatsAppCallback); // Note: POST request via frontend API
 router.get("/status", protect, getWhatsAppStatus);
 router.delete("/unlink/:phone_number_id", protect, unlinkWhatsAppAccount);
 

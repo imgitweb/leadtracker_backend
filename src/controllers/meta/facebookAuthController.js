@@ -1,14 +1,20 @@
 import axios from "axios";
+import dotenv from 'dotenv';
 import FacebookAccount from "../../models/FacebookAccount.js";
+dotenv.config();
 
-// const CLIENT_ID = process.env.FACEBOOK_CLIENT_ID;
-// const CLIENT_SECRET = process.env.FACEBOOK_CLIENT_SECRET;
-// const REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
-// const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-const CLIENT_ID = "1175088701269032";
-const CLIENT_SECRET = "60fef6ba1770f20b048991ba65b94893";
-const REDIRECT_URI = "https://wma-constitutional-memo-node.trycloudflare.com/api/fb/auth/callback";
-const FRONTEND_URL = "http://localhost:5173";
+
+
+const CLIENT_ID = process.env.FACEBOOK_CLIENT_ID;
+const CLIENT_SECRET = process.env.FACEBOOK_CLIENT_SECRET;
+const REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+
+// const CLIENT_ID = "1175088701269032";
+// const CLIENT_SECRET = "60fef6ba1770f20b048991ba65b94893";
+// const REDIRECT_URI = "https://wma-constitutional-memo-node.trycloudflare.com/api/fb/auth/callback";
+// const FRONTEND_URL = "http://localhost:5173";
+
 
 export const redirectToFacebook = (req, res) => {
   const userId = req.user._id.toString();
