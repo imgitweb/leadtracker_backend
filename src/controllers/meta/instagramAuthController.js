@@ -1,10 +1,17 @@
+import dotenv from 'dotenv';
 import axios from "axios";
 import InstagramAccount from "../../models/InstagramAccount.js";
+dotenv.config();
 
 const CLIENT_ID = process.env.INSTAGRAM_CLIENT_ID;
 const CLIENT_SECRET = process.env.INSTAGRAM_CLIENT_SECRET;
 const REDIRECT_URI = process.env.INSTAGRAM_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+
+// const CLIENT_ID = "1962418167691714";
+// const CLIENT_SECRET = "3b6398df9198a40aa687721e9b8e1181";
+// const REDIRECT_URI = "https://wma-constitutional-memo-node.trycloudflare.com/api/insta/callback";
+// const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 
 // 1. Redirect to Instagram (Sends Auth URL to Frontend)
 export const redirectToInstagram = (req, res) => {
@@ -23,6 +30,7 @@ export const redirectToInstagram = (req, res) => {
     });
 
     const url = `https://www.instagram.com/oauth/authorize?${params.toString()}`;
+    console.log("url --- ",url)
     
     // Return URL to frontend so it can redirect the window
     res.json({ authUrl: url });
