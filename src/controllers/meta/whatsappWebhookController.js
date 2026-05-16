@@ -1,12 +1,15 @@
 import axios from "axios";
+import dotenv from 'dotenv';
 import WhatsAppConversation from "../../models/WhatsAppConversation.js";
 import WhatsAppMessage from "../../models/WhatsAppMessage.js";
 import WhatsAppAccount from "../../models/WhatsAppAccount.js"; 
 import StartupData from "../../models/StartupData.js";         
 import { generateAIReply } from "../../utils/aiHelper.js";     
 
-// const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
-const VERIFY_TOKEN = "qwertyuiop1234567890"; // Same as your FB/IG token
+dotenv.config();
+
+const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
+// const VERIFY_TOKEN = "qwertyuiop1234567890"; // Same as your FB/IG token
 
 // 1. Verify Webhook (GET)
 export const verifyWaWebhook = (req, res) => {

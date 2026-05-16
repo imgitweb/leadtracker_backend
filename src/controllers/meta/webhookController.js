@@ -1,9 +1,14 @@
 import axios from "axios";
+import dotenv from 'dotenv';
 import Conversation from "../../models/Conversation.js";
 import Message from "../../models/Message.js";
 import InstagramAccount from "../../models/InstagramAccount.js";
 import StartupData from "../../models/StartupData.js";
 import { generateAIReply } from "../../utils/aiHelper.js"; // Aapka AI helper
+
+
+dotenv.config();
+
 
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
 // const VERIFY_TOKEN = "qwertyuiop1234567890"

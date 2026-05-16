@@ -1,13 +1,16 @@
 import axios from "axios";
+import dotenv from 'dotenv';
 import FacebookConversation from "../../models/FacebookConversation.js";
 import FacebookMessage from "../../models/FacebookMessage.js";
 import FacebookAccount from "../../models/FacebookAccount.js";
 import StartupData from "../../models/StartupData.js";
 import { generateAIReply } from "../../utils/aiHelper.js"; // Aapka AI helper
 
+dotenv.config();
+
 // Same Verify Token logic as Instagram
-// const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN; 
-const VERIFY_TOKEN = "qwertyuiop1234567890"; 
+const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN; 
+// const VERIFY_TOKEN = "qwertyuiop1234567890"; 
 
 // 1. Verify Webhook (GET)
 export const verifyFbWebhook = (req, res) => {

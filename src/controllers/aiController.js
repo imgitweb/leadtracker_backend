@@ -4,8 +4,6 @@ import FacebookAccount from "../models/FacebookAccount.js"; // Assuming you have
 import WhatsAppAccount from "../models/WhatsAppAccount.js";
 
 
-
-
 // 1. Get User's Startup Data
 export const getStartupData = async (req, res) => {
   try {
@@ -78,7 +76,6 @@ export const toggleAIStatus = async (req, res) => {
     res.status(500).json({ error: "Failed to toggle AI" });
   }
 };
-
 
 
 export const setupAIAutoReply = async (req, res) => {
