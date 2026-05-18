@@ -31,6 +31,7 @@ import analyticsRoutes from './routes/analytics.js';
 import superAdminRoutes from './superadmin/routes/superAdminRoutes.js';
 import { CompanyModuleService } from './services/CompanyModuleService.js';
 import aiRoutes from "./routes/aiRoutes.js";
+import chatRoutes from './routes/chatRoutes.js';
 
 import instagramAuth from './routes/meta/instagramAuth.js';
 import instagramDataRoutes from './routes/meta/instagramDataRoutes.js';
@@ -125,6 +126,8 @@ app.use('/api/analytics', analyticsRoutes);
 app.use('/api/superadmin', superAdminRoutes);
 
 app.use('/api/ai', aiRoutes);
+app.use('/api/chat', chatRoutes);
+
 app.use('/api/insta', instagramAuth);
 app.use('/api/insta-data', instagramDataRoutes);
 app.use("/api/webhook/instagram", webhookRoutes);
