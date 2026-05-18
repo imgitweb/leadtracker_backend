@@ -416,9 +416,10 @@ export class SuperAdminService {
       ownerFullName,
       ownerEmail,
       ownerPassword,
-      plan = 'free',
+      plan = 'enterprise',
       modules: initialModules,
     } = companyData;
+    console.log(companyData);
 
     if (!companyName || !ownerFullName || !ownerEmail || !ownerPassword) {
       throw new Error('Company name, owner details (full name, email, password) are required.');
@@ -438,9 +439,6 @@ export class SuperAdminService {
     if (existingUser) {
       throw new Error(`User with email "${ownerEmail}" already exists.`);
     }
-
-    const session = await mongoose.startSession();
-    session.startTransaction();
 
     try {
       const ownerId = new mongoose.Types.ObjectId();
@@ -465,42 +463,32 @@ export class SuperAdminService {
         company: companyId,
       });
 
-      await company.save({ session });
-      await owner.save({ session });
+      await company.save();
+      await owner.save();
 
       // Ensure modules are created, then apply initial configuration
-      const companyModuleDoc = await CompanyModuleService.ensureCompanyModules(companyId, ownerId, session);
+      await CompanyModuleService.ensureCompanyModules(companyId, ownerId);
 
       if (initialModules && Array.isArray(initialModules)) {
-        await CompanyModuleService.updateCompanyModules(companyId, adminUserId, initialModules, session);
+        await CompanyModuleService.updateCompanyModules(companyId, adminUserId, initialModules);
       }
 
-      await AuditLog.create(
-        [
-          {
-            user: adminUserId,
-            company: companyId,
-            action: 'company_created',
-            resource: 'Company',
-            resourceId: companyId,
-            changes: { after: company.toObject() },
-            status: 'success',
-            description: `Company "${companyName}" created by super admin.`,
-          },
-        ],
-        { session }
-      );
-
-      await session.commitTransaction();
+      await AuditLog.create({
+        user: adminUserId,
+        company: companyId,
+        action: 'company_created',
+        resource: 'Company',
+        resourceId: companyId,
+        changes: { after: company.toObject() },
+        status: 'success',
+        description: `Company "${companyName}" created by super admin.`,
+      });
 
       const newCompany = await this.getCompany(companyId);
 
       return newCompany;
     } catch (error) {
-      await session.abortTransaction();
       throw error;
-    } finally {
-      session.endSession();
     }
   }
 
@@ -618,6 +606,38 @@ export class SuperAdminService {
     });
 
     return company.toObject();
+  }
+
+  static async deleteCompany(companyId, adminUserId) {
+    const company = await Company.findById(companyId);
+    if (!company) {
+      throw new Error('Company not found');
+    }
+
+    const adminUser = await User.findById(adminUserId);
+    if (adminUser && String(adminUser.company) === String(companyId)) {
+      throw new Error('You cannot delete the company you currently belong to.');
+    }
+
+    await User.deleteMany({ company: companyId });
+    await Lead.deleteMany({ companyId: companyId });
+    await AuditLog.deleteMany({ company: companyId });
+
+    await Company.deleteOne({ _id: companyId });
+
+    if (adminUser) {
+      await AuditLog.create({
+        user: adminUserId,
+        company: adminUser.company,
+        action: 'company_deleted',
+        resource: 'Company',
+        resourceId: companyId,
+        status: 'success',
+        description: `Company "${company.name}" deleted by super admin`,
+      });
+    }
+
+    return { message: 'Company and all associated data deleted successfully' };
   }
 
   static async syncCompanyLimits(companyId, adminUserId) {

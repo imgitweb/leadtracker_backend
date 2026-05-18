@@ -20,7 +20,7 @@ router.get("/:pageId/conversations", protect, getFbConversations);
 
 // 3. Get all messages for a specific conversation
 // example route definition
-router.get("/:pageId/conversations/:conversationId/messages", getFbMessages);
+router.get("/:pageId/conversations/:conversationId/messages", protect, getFbMessages);
 
 // 4. Send a message to a customer from the Facebook Page
 router.post("/:pageId/messages", protect, sendFbMessage);

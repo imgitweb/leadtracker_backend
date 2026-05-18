@@ -16,6 +16,7 @@ import {
   updateCompany,
   updateCompanyPlan,
   updateCompanyStatus,
+  deleteCompany,
   syncCompanyLimits,
   getAuditLogs,
 } from '../controllers/superAdminController.js';
@@ -41,6 +42,7 @@ router.get('/companies/:companyId/details', getCompanyDetails);
 router.patch('/companies/:companyId', updateCompany);
 router.patch('/companies/:companyId/plan', updateCompanyPlan);
 router.patch('/companies/:companyId/status', updateCompanyStatus);
+router.delete('/companies/:companyId', deleteCompany);
 router.post('/companies/:companyId/sync-limits', syncCompanyLimits);
 
 router.get('/audit-logs', getAuditLogs);

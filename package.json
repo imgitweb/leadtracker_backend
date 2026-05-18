@@ -15,7 +15,7 @@
     "lead-tracker",
     "crm"
   ],
-  "author": "Cinfy",
+  "author": "Ankit Jatav",
   "license": "ISC",
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -124,6 +124,15 @@ export const updateCompanyStatus = async (req, res) => {
   }
 };
 
+export const deleteCompany = async (req, res) => {
+  try {
+    const result = await SuperAdminService.deleteCompany(req.params.companyId, req.user._id);
+    sendResponse(res, 200, true, result.message);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
 export const syncCompanyLimits = async (req, res) => {
   try {
     const company = await SuperAdminService.syncCompanyLimits(req.params.companyId, req.user._id);
