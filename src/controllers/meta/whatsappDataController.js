@@ -3,6 +3,9 @@ import WhatsAppAccount from "../../models/WhatsAppAccount.js";
 import WhatsAppConversation from "../../models/WhatsAppConversation.js";
 import WhatsAppMessage from "../../models/WhatsAppMessage.js";
 
+// ==========================================
+// 1. GET CONVERSATIONS
+// ==========================================
 export const getWaConversations = async (req, res) => {
   try {
     const conversations = await WhatsAppConversation.find({ phone_number_id: req.params.phoneId }).sort({ last_message_time: -1 });
@@ -12,6 +15,9 @@ export const getWaConversations = async (req, res) => {
   }
 };
 
+// ==========================================
+// 2. GET MESSAGES
+// ==========================================
 export const getWaMessages = async (req, res) => {
   try {
     const messages = await WhatsAppMessage.find({ conversation_id: req.params.convId }).sort({ createdAt: 1 });
@@ -21,6 +27,9 @@ export const getWaMessages = async (req, res) => {
   }
 };
 
+// ==========================================
+// 3. SEND MESSAGE
+// ==========================================
 export const sendWaMessage = async (req, res) => {
   try {
     const { phoneId } = req.params;
@@ -55,11 +64,13 @@ export const sendWaMessage = async (req, res) => {
   }
 };
 
-
+// ==========================================
+// 4. TOGGLE AI AUTO-REPLY
+// ==========================================
 export const toggleWaConversationAI = async (req, res) => {
   try {
-    const { convId } = req.params; // Route params se conversationId lenge
-    const { isEnabled } = req.body; // true ya false
+    const { convId } = req.params; 
+    const { isEnabled } = req.body; 
 
     if (typeof isEnabled !== 'boolean') {
       return res.status(400).json({ error: "isEnabled must be a boolean value" });
@@ -68,7 +79,7 @@ export const toggleWaConversationAI = async (req, res) => {
     const updatedConversation = await WhatsAppConversation.findByIdAndUpdate(
       convId,
       { ai_enabled: isEnabled },
-      { new: true } // Return updated document
+      { new: true } 
     );
 
     if (!updatedConversation) {
@@ -85,3 +96,84 @@ export const toggleWaConversationAI = async (req, res) => {
     res.status(500).json({ error: "Failed to toggle conversation AI settings" });
   }
 };
+
+// ==========================================
+// 5. CREATE WHATSAPP TEMPLATE (NEW)
+// ==========================================
+export const createWhatsAppTemplate = async (req, res) => {
+  try {
+    const { phoneId, templateName, category, language, headerText, bodyText, footerText } = req.body;
+    const userId = req.user._id;
+
+    // Database se verify karein ki is phone number ka waba_id kya hai
+    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+
+    if (!account || !account.waba_id) {
+      return res.status(404).json({ error: "WhatsApp account or WABA ID not found." });
+    }
+
+    const { waba_id, access_token } = account;
+
+    // Meta API ke liye Components array dynamically build karein
+    const components = [];
+
+    // Header optional hai
+    if (headerText && headerText.trim() !== '') {
+      components.push({
+        type: 'HEADER',
+        format: 'TEXT',
+        text: headerText
+      });
+    }
+
+    // Body required hai
+    components.push({
+      type: 'BODY',
+      text: bodyText
+    });
+
+    // Footer optional hai
+    if (footerText && footerText.trim() !== '') {
+      components.push({
+        type: 'FOOTER',
+        text: footerText
+      });
+    }
+
+    const templatePayload = {
+      name: templateName,
+      language: language,
+      category: category,
+      components: components
+    };
+
+    // Send to Meta Graph API
+    const response = await axios.post(
+      `https://graph.facebook.com/v19.0/${waba_id}/message_templates`,
+      templatePayload,
+      {
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    res.status(200).json({ 
+      success: true, 
+      message: "Template submitted for review successfully!",
+      template_id: response.data.id,
+      status: response.data.status // Usually "PENDING"
+    });
+
+  } catch (error) {
+    console.error("Meta API Template Error:", error.response?.data || error.message);
+    const errorMsg = error.response?.data?.error?.error_user_msg 
+                  || error.response?.data?.error?.message 
+                  || "Failed to create template on Meta.";
+
+    res.status(500).json({ error: errorMsg });
+  }
+};
+
+

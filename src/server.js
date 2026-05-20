@@ -64,7 +64,7 @@ app.use(helmet({
   crossOriginResourcePolicy: false,
 }));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173' || " https://edge-labeled-prostores-york.trycloudflare.com",
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173' || "https://steam-nicholas-market-chrome.trycloudflare.com",
   credentials: true,
 }));
 

@@ -1,13 +1,25 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import SystemModule from '../models/SystemModule.js';
 import { MODULE_DEFINITIONS, MODULE_KEYS } from '../config/modules.js';
 import { CompanyModuleService } from '../services/CompanyModuleService.js';
 
-dotenv.config();
+// 1. Recreate __dirname for ES Modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 2. Explicitly tell dotenv where the .env file is (root directory)
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 const seedModules = async () => {
   try {
+    // 3. Add a quick sanity check to prevent undefined errors
+    if (!process.env.MONGO_URI) {
+      throw new Error('MONGO_URI is missing in environment. Check your .env file path.');
+    }
+
     await mongoose.connect(process.env.MONGO_URI);
     console.log('Connected to DB');
 

@@ -8,31 +8,30 @@ const CLIENT_SECRET = process.env.INSTAGRAM_CLIENT_SECRET;
 const REDIRECT_URI = process.env.INSTAGRAM_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 
-// const CLIENT_ID = "1962418167691714";
-// const CLIENT_SECRET = "3b6398df9198a40aa687721e9b8e1181";
-// const REDIRECT_URI = "https://wma-constitutional-memo-node.trycloudflare.com/api/insta/callback";
-// const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+// 🔥 Use the latest Graph API version
+const API_VERSION = "v20.0"; 
 
-// 1. Redirect to Instagram (Sends Auth URL to Frontend)
+// 1. Redirect to Instagram
 export const redirectToInstagram = (req, res) => {
   try {
-    // 🔥 FIX: Mongoose document ID is accessed via _id, not userId
     const userId = req.user._id.toString(); 
     
-    console.log("Generating Instagram Auth URL for User ID:", userId);
+    // 🔥 FIX: Read requested scopes from frontend query params, fallback to defaults if not provided
+    const requestedScopes = req.query.scopes || "instagram_business_basic,instagram_business_manage_messages";
+    
+    console.log("Generating Instagram Auth URL for User ID:", userId, "with scopes:", requestedScopes);
 
     const params = new URLSearchParams({
       client_id: CLIENT_ID,
       redirect_uri: REDIRECT_URI,
       response_type: "code",
-      scope: "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish",
-      state: userId // Send User ID to Meta to track who is logging in
+      scope: requestedScopes, // Injecting dynamic selected scopes here
+      state: userId 
     });
 
     const url = `https://www.instagram.com/oauth/authorize?${params.toString()}`;
-    console.log("url --- ",url)
+    console.log("url --- ", url);
     
-    // Return URL to frontend so it can redirect the window
     res.json({ authUrl: url });
   } catch (error) {
     console.error("Error generating Instagram Auth URL:", error);
@@ -44,7 +43,7 @@ export const redirectToInstagram = (req, res) => {
 export const handleInstagramCallback = async (req, res) => {
   let code = req.query.code;
   const userId = req.query.state;
-  console.log("call back code - ", code) // Meta returns our userId here
+  console.log("Callback code received:", code ? "Yes" : "No");
 
   if (!code) {
     return res.redirect(`${FRONTEND_URL}/integrations?insta_status=error&message=NoCode`);
@@ -53,8 +52,15 @@ export const handleInstagramCallback = async (req, res) => {
   // BULLETPROOF CLEANING: Remove Meta's trailing hash
   code = code.split("#_")[0].trim();
 
+  let validAccessToken = "";
+  let igUserId = "";
+  let permissionsArray = [];
+  let expiresIn = 3600; // Default to 1 hour
+
+  // ==========================================
+  // STEP A: Get Initial Token
+  // ==========================================
   try {
-    // Step A: Get Short-Lived Token
     const tokenParams = new URLSearchParams({
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
@@ -64,53 +70,74 @@ export const handleInstagramCallback = async (req, res) => {
     });
 
     const shortTokenResponse = await axios.post(
-      "https://api.instagram.com/oauth/access_token",
+      `https://api.instagram.com/oauth/access_token`,
       tokenParams.toString(),
       { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
     );
 
-    const shortTokenData = shortTokenResponse.data;
-    const shortLivedToken = shortTokenData.access_token;
-    const igUserId = shortTokenData.user_id;
+    validAccessToken = shortTokenResponse.data.access_token;
+    igUserId = shortTokenResponse.data.user_id;
+    permissionsArray = Array.isArray(shortTokenResponse.data.permissions)
+      ? shortTokenResponse.data.permissions
+      : shortTokenResponse.data.permissions?.split(",") || [];
 
-    const permissionsArray = Array.isArray(shortTokenData.permissions)
-      ? shortTokenData.permissions
-      : shortTokenData.permissions.split(",");
+    console.log("✅ Step A Success. Token Prefix:", validAccessToken?.substring(0, 10));
+  } catch (error) {
+    console.error("❌ STEP A FAILED:", error.response?.data || error.message);
+    return res.redirect(`${FRONTEND_URL}/integrations?insta_status=error&message=TokenExchangeFailed`);
+  }
 
-    // Step B: Exchange for Long-Lived Token
+  // ==========================================
+  // STEP B: Exchange for Long-Lived Token
+  // ==========================================
+  try {
     const longTokenResponse = await axios.get(
-      "https://graph.instagram.com/access_token",
+      `https://graph.instagram.com/v20.0/access_token`,
       {
         params: {
           grant_type: "ig_exchange_token",
           client_secret: CLIENT_SECRET,
-          access_token: shortLivedToken,
+          access_token: validAccessToken,
         },
       }
     );
 
-    const longLivedData = longTokenResponse.data;
-    const longLivedToken = longLivedData.access_token;
+    validAccessToken = longTokenResponse.data.access_token; 
+    expiresIn = longTokenResponse.data.expires_in || 5184000; 
+    
+    console.log("✅ Step B Success. Long-Lived Token Prefix:", validAccessToken?.substring(0, 10));
+  } catch (error) {
+    console.error("❌ STEP B FAILED (Meta rejected exchange):", error.response?.data?.error?.message || error.message);
+    console.log("⚠️ Falling back to Step A token to prevent crash...");
+  }
 
-    // Step C: Fetch Instagram Username & Profile Picture
-    let igUsername = "";
-    let igProfilePic = "";
-    try {
-      const profileResponse = await axios.get(`https://graph.instagram.com/me`, {
-        params: {
-          fields: "id,username,profile_picture_url",
-          access_token: longLivedToken
-        }
-      });
-      igUsername = profileResponse.data.username;
-      igProfilePic = profileResponse.data.profile_picture_url || "";
-    } catch (profileError) {
-      console.error("Warning: Could not fetch profile data", profileError.response?.data?.error?.message);
-    }
+  // ==========================================
+  // STEP C: Fetch Instagram Username & Profile
+  // ==========================================
+  let igUsername = "";
+  let igProfilePic = "";
+  try {
+    const profileResponse = await axios.get(`https://graph.instagram.com/v20.0/me`, {
+      params: {
+        fields: "id,username,profile_picture_url",
+        access_token: validAccessToken
+      }
+    });
+    
+    igUsername = profileResponse.data.username || "InstagramUser";
+    igProfilePic = profileResponse.data.profile_picture_url || "";
+    
+    console.log("✅ Step C Success. Fetched user:", igUsername);
+  } catch (error) {
+    console.error("❌ STEP C FAILED (Could not fetch profile):", error.response?.data?.error?.message || error.message);
+  }
 
-    // Step D: Save to MongoDB
+  // ==========================================
+  // STEP D: Save to MongoDB & Redirect
+  // ==========================================
+  try {
     const expiryDate = new Date();
-    expiryDate.setSeconds(expiryDate.getSeconds() + longLivedData.expires_in);
+    expiryDate.setSeconds(expiryDate.getSeconds() + expiresIn);
 
     await InstagramAccount.findOneAndUpdate(
       { instagram_user_id: igUserId },
@@ -118,20 +145,19 @@ export const handleInstagramCallback = async (req, res) => {
         userId: userId || null, 
         ig_username: igUsername,
         ig_profile_picture: igProfilePic,
-        access_token: longLivedToken,
+        access_token: validAccessToken,
         permissions: permissionsArray,
         token_expires_at: expiryDate,
       },
       { new: true, upsert: true }
     );
 
-    // SUCCESS REDIRECT: Send user back to Frontend Integrations page
+    console.log("✅ Step D Success. User saved to DB.");
     res.redirect(`${FRONTEND_URL}/integrations?insta_status=success&username=${igUsername}`);
 
   } catch (error) {
-    console.error("Authentication Error:", error.response?.data || error.message);
-    // ERROR REDIRECT
-    res.redirect(`${FRONTEND_URL}/integrations?insta_status=error`);
+    console.error("❌ STEP D FAILED (Database error):", error.message);
+    res.redirect(`${FRONTEND_URL}/integrations?insta_status=error&message=DBError`);
   }
 };
 
@@ -144,7 +170,7 @@ export const refreshInstagramToken = async (req, res) => {
     if (!account) return res.status(404).json({ error: "Instagram account not found in DB" });
 
     const refreshResponse = await axios.get(
-      "https://graph.instagram.com/refresh_access_token",
+      `https://graph.instagram.com/${API_VERSION}/refresh_access_token`, 
       {
         params: {
           grant_type: "ig_refresh_token",
@@ -172,7 +198,6 @@ export const refreshInstagramToken = async (req, res) => {
 // 4. Fetch Connection Status for Dashboard/Frontend
 export const getInstagramStatus = async (req, res) => {
   try {
-    // 🔥 FIX: Mongoose document ID is accessed via _id
     const userId = req.user._id;
 
     const accounts = await InstagramAccount.find({ userId: userId });

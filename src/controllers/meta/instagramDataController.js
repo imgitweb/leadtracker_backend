@@ -15,7 +15,7 @@ export const getInstagramPosts = async (req, res) => {
     // Fetch media from Instagram Graph API
     const response = await axios.get(`https://graph.instagram.com/${accountId}/media`, {
       params: {
-        fields: "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp",
+        fields: "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,",
         access_token: account.access_token
       }
     });
