@@ -9,4 +9,6 @@ const waConversationSchema = new mongoose.Schema({
   ai_enabled: { type: Boolean, default: true },
 }, { timestamps: true });
 
+waConversationSchema.index({ phone_number_id: 1, customer_phone: 1 }, { unique: true });
+
 export default mongoose.model("WhatsAppConversation", waConversationSchema);
