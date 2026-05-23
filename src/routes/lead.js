@@ -1,20 +1,27 @@
-import express from 'express';
-import { createLead } from '../controllers/leadController.js';
-import { protect, apiKeyProtect } from '../middleware/auth.js';
+import express from "express";
+import { createLead } from "../controllers/leadController.js";
+import { protect, apiKeyProtect } from "../middleware/auth.js";
+import { syncData } from "../controllers/DBSync/SyncAPI.js";
 
 const router = express.Router();
 
 // Helper to allow either JWT or API Key (same behavior as contact route)
 const protectOrApiKey = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  const hasApiKeyHeader = !!req.headers['x-api-key'];
-  const hasApiKeyAuthScheme = typeof authHeader === 'string' && authHeader.startsWith('ApiKey ');
+  const hasApiKeyHeader = !!req.headers["x-api-key"];
+  const hasApiKeyAuthScheme =
+    typeof authHeader === "string" && authHeader.startsWith("ApiKey ");
 
   try {
     const hasAuth = !!authHeader;
-    console.log(`[protectOrApiKey:/api/lead] x-api-key present: ${hasApiKeyHeader}, Authorization present: ${hasAuth}`);
+    console.log(
+      `[protectOrApiKey:/api/lead] x-api-key present: ${hasApiKeyHeader}, Authorization present: ${hasAuth}`,
+    );
   } catch (err) {
-    console.log('[protectOrApiKey:/api/lead] headers inspect error', err.message);
+    console.log(
+      "[protectOrApiKey:/api/lead] headers inspect error",
+      err.message,
+    );
   }
 
   if (hasApiKeyHeader || hasApiKeyAuthScheme) {
@@ -25,6 +32,9 @@ const protectOrApiKey = (req, res, next) => {
 };
 
 // POST /api/lead/add-new -> Create a lead (API-focused endpoint)
-router.post('/add-new', protectOrApiKey, createLead);
+router.post("/add-new", protectOrApiKey, createLead);
+
+// sync data base from api
+router.post("/sync-leads", protectOrApiKey, syncData);
 
 export default router;
