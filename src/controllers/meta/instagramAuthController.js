@@ -15,12 +15,12 @@ export const redirectToInstagram = (req, res) => {
 export const handleInstagramCallback = async (req, res) => {
   try {
     // 1. Safety check for Auth Middleware
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({ error: "Unauthorized: User not found." });
-    }
+    // if (!req.user || !req.user._id) {
+    //   return res.status(401).json({ error: "Unauthorized: User not found." });
+    // }
 
     const { accessToken } = req.body; 
-    const userId = req.user._id;
+    const userId = req.user._id.toString();
 
     if (!accessToken) {
       return res.status(400).json({ error: "Access token is required" });
