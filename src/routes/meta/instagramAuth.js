@@ -13,7 +13,7 @@ const router = express.Router();
 router.get("/login", protect, redirectToInstagram);
 
 // 2. Callback Route (Meta redirect karega yahan, isme JWT NAHI lagana hai)
-router.get("/callback", handleInstagramCallback);
+router.post("/callback", protect, handleInstagramCallback);
 
 // 3. Refresh Token Route (Manual refresh ke liye, Protected)
 router.post("/refresh-token", protect, refreshInstagramToken);

@@ -1,6 +1,10 @@
 import express from "express";
 import {
   getFacebookPosts,
+  publishFacebookPost,          // 👈 Naya Import
+  getFbPostComments,            // 👈 Naya Import
+  replyToFbComment,             // 👈 Naya Import
+  deleteFbComment,              // 👈 Naya Import
   getFbConversations,
   getFbMessages,
   sendFbMessage,
@@ -12,24 +16,26 @@ import { protect } from "../../middleware/auth.js";
 
 const router = express.Router();
 
-// 1. Get posts for a specific Facebook Page
+// =======================
+// 📸 POSTS & COMMENTS
+// =======================
 router.get("/:pageId/posts", protect, getFacebookPosts);
+router.post("/:pageId/posts", protect, publishFacebookPost); // Publish Post
 
-// 2. Get all conversations for a specific Facebook Page
+router.get("/:pageId/posts/:postId/comments", protect, getFbPostComments); // Fetch Comments
+router.post("/:pageId/comments/:commentId/reply", protect, replyToFbComment); // Reply Comment
+router.delete("/:pageId/comments/:commentId", protect, deleteFbComment); // Delete Comment
+
+// =======================
+// 💬 MESSAGES & INBOX
+// =======================
 router.get("/:pageId/conversations", protect, getFbConversations);
-
-// 3. Get all messages for a specific conversation
-// example route definition
 router.get("/:pageId/conversations/:conversationId/messages", protect, getFbMessages);
-
-// 4. Send a message to a customer from the Facebook Page
 router.post("/:pageId/messages", protect, sendFbMessage);
 
-router.put('/:pageId/conversations/:conversationId', updateFbConversationName);
-
-
-router.delete('/:pageId/conversations/:conversationId/messages', clearFbMessages);
-
+// Added 'protect' middleware here for security
+router.put('/:pageId/conversations/:conversationId', protect, updateFbConversationName);
+router.delete('/:pageId/conversations/:conversationId/messages', protect, clearFbMessages);
 router.post("/:pageId/conversations/:conversationId/toggle-ai", protect, toggleFbConversationAI);
 
 export default router;
