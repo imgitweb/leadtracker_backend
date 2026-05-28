@@ -5,8 +5,6 @@ dotenv.config();
 
 const CLIENT_ID = process.env.FACEBOOK_CLIENT_ID;
 const CLIENT_SECRET = process.env.FACEBOOK_CLIENT_SECRET;
-const REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
 
 export const handleFacebookCallback = async (req, res) => {
   try {
@@ -17,92 +15,76 @@ export const handleFacebookCallback = async (req, res) => {
       return res.status(400).json({ error: "Access token is required" });
     }
 
+    // ==================================================
+    // STEP 1: EXCHANGE FOR LONG-LIVED TOKEN (CRITICAL)
+    // ==================================================
+    let longLivedToken = accessToken; // Fallback to short token if exchange fails
+    try {
+      const tokenExchangeRes = await axios.get('https://graph.facebook.com/v19.0/oauth/access_token', {
+        params: {
+          grant_type: 'fb_exchange_token',
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          fb_exchange_token: accessToken
+        }
+      });
+      longLivedToken = tokenExchangeRes.data.access_token;
+    } catch (tokenErr) {
+      console.error("Token Exchange Failed (Using short-lived):", tokenErr.response?.data || tokenErr.message);
+    }
+
     const savedAccounts = [];
 
     // ==================================================
-    // STEP 1: FETCH & SAVE PERSONAL FACEBOOK PROFILE
+    // STEP 2: FETCH & SAVE *ONLY* BUSINESS PAGES
     // ==================================================
     try {
-      const profileRes = await axios.get(`https://graph.facebook.com/v19.0/me`, {
-        params: {
-          access_token: accessToken,
-          fields: 'id,name,picture{url}' // Fetching User ID, Name, and DP
-        }
-      });
-
-      const profileData = profileRes.data;
-      const profilePicUrl = profileData.picture?.data?.url || "";
-
-      // Save Personal Profile to Database
-      // Note: We use 'id' instead of 'page_id' so frontend knows it's a personal account
-      const savedProfile = await FacebookAccount.findOneAndUpdate(
-        { id: profileData.id, userId: userId }, 
-        {
-          userId,
-          id: profileData.id,            // Personal Profile ID
-          name: profileData.name,        // Personal Profile Name
-          profile_picture: profilePicUrl,// Personal Profile Picture
-          access_token: accessToken      // User Access Token
-        },
-        { new: true, upsert: true }
-      );
-
-      savedAccounts.push(savedProfile);
-    } catch (profileErr) {
-      console.error("Failed to fetch personal profile:", profileErr.message);
-      // We don't stop the execution here, we still try to fetch pages
-    }
-
-    // ==================================================
-    // STEP 2: FETCH & SAVE FACEBOOK BUSINESS PAGES
-    // ==================================================
-    try {
+      // Use the longLivedToken here to ensure Page tokens don't expire quickly
       const fbRes = await axios.get(`https://graph.facebook.com/v19.0/me/accounts`, {
         params: {
-          access_token: accessToken,
+          access_token: longLivedToken, 
           fields: 'id,name,access_token,picture{url}' 
         }
       });
 
       const pages = fbRes.data.data;
 
-      // Only loop and save if pages exist
-      if (pages && pages.length > 0) {
-        for (const page of pages) {
-          const picUrl = page.picture?.data?.url || "";
+      if (!pages || pages.length === 0) {
+        return res.status(400).json({ 
+          error: "no_pages_found",
+          message: "No Facebook Business Pages found. Make sure you select a Business Page during login." 
+        });
+      }
 
-          const savedAcc = await FacebookAccount.findOneAndUpdate(
-            { page_id: page.id, userId: userId }, 
-            {
-              userId,
-              page_id: page.id,                      // Business Page ID
-              page_name: page.name,                  // Business Page Name
-              page_profile_picture: picUrl,          // Business Page Picture
-              access_token: page.access_token        // Page Access Token
-            },
-            { new: true, upsert: true }
-          );
-          
-          savedAccounts.push(savedAcc);
-        }
+      // Loop through and save ONLY the Business Pages
+      for (const page of pages) {
+        const picUrl = page.picture?.data?.url || "";
+
+        const savedAcc = await FacebookAccount.findOneAndUpdate(
+          { page_id: page.id, userId: userId }, 
+          {
+            userId,
+            page_id: page.id,                      // Business Page ID
+            page_name: page.name,                  // Business Page Name
+            page_profile_picture: picUrl,          // Business Page Picture
+            access_token: page.access_token        // Page Access Token
+          },
+          { new: true, upsert: true }
+        );
+        
+        savedAccounts.push(savedAcc);
       }
     } catch (pageErr) {
-      console.error("Failed to fetch business pages:", pageErr.message);
+      console.error("Failed to fetch business pages:", pageErr.response?.data || pageErr.message);
+      return res.status(500).json({ error: "Failed to fetch pages from Meta API." });
     }
 
     // ==================================================
     // STEP 3: FINAL RESPONSE
     // ==================================================
-    
-    // Check if at least one account (Profile OR Page) was saved
-    if (savedAccounts.length === 0) {
-      return res.status(400).json({ error: "Failed to link any Facebook account or page." });
-    }
-
-    // Send success JSON back to the React frontend
     res.status(200).json({ 
       success: true, 
-      message: "Connected successfully", 
+      message: "Business Pages connected successfully", 
       accounts: savedAccounts 
     });
 
@@ -111,11 +93,6 @@ export const handleFacebookCallback = async (req, res) => {
     res.status(500).json({ error: "Failed to process Facebook connection." });
   }
 };
-
-
-// ==========================================
-// Your other functions remain perfectly fine!
-// ==========================================
 
 export const getFacebookStatus = async (req, res) => {
   try {
@@ -136,7 +113,6 @@ export const unlinkFacebookAccount = async (req, res) => {
     res.status(500).json({ error: "Failed to unlink" });
   }
 };
-
 
 
 
