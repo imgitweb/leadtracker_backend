@@ -23,15 +23,7 @@ const buildLeadScopeMatch = (req, extraMatch = {}) => {
   return match;
 };
 
-/**
- * GET /api/analytics
- * Query params:
- *  - page (default 1)
- *  - limit (default 10)
- *  - days (for chart range, default 7)
- *
- * Returns company-scoped aggregated analytics and paginated upcoming follow-ups
- */
+
 export const getCompanyAnalytics = async (req, res) => {
   try {
     const companyId = req.user.company._id;
@@ -47,7 +39,15 @@ export const getCompanyAnalytics = async (req, res) => {
     const totalLeads = await Lead.countDocuments(buildLeadScopeMatch(req));
     const activeFormsCount = await Form.countDocuments({ companyId: companyObjectId, isActive: true });
 
-    // Leads by status
+    // ─── Per-Status Counts (for stat cards) ───────────────────────────────
+    const newLeads        = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'New' }));
+    const qualifiedLeads  = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Qualified' }));
+    const openCases       = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Support' }));
+    const inConversation  = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Contacted' }));
+    const convertedLeads  = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Converted' }));
+    const lostLeads       = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Lost' }));
+
+    // ─── Leads by Status (grouped) ─────────────────────────────────────────
     const leadsByStatusAgg = await Lead.aggregate([
       { $match: buildLeadScopeMatch(req) },
       { $group: { _id: '$status', count: { $sum: 1 } } },
@@ -57,11 +57,28 @@ export const getCompanyAnalytics = async (req, res) => {
       return acc;
     }, {});
 
-    // Submissions per day for last `days` days (default 7)
+    // ─── Leads by Source ────────────────────────────────────────────────────
+    const leadsBySourceAgg = await Lead.aggregate([
+      { $match: buildLeadScopeMatch(req) },
+      {
+        $group: {
+          _id: { $ifNull: ['$source', 'Organic'] },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { count: -1 } },
+      { $limit: 10 },
+    ]);
+    const leadsBySource = leadsBySourceAgg.map((item) => ({
+      source: item._id || 'Organic',
+      count: item.count,
+    }));
+
+    // ─── Submissions per day (new leads + qualified per day) ───────────────
     const daysInt = Math.max(1, parseInt(days));
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - (daysInt - 1));
-    startDate.setHours(0,0,0,0);
+    startDate.setHours(0, 0, 0, 0);
 
     const submissionsByDayAgg = await Lead.aggregate([
       { $match: buildLeadScopeMatch(req, { createdAt: { $gte: startDate } }) },
@@ -69,6 +86,11 @@ export const getCompanyAnalytics = async (req, res) => {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
           count: { $sum: 1 },
+          qualified: {
+            $sum: {
+              $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0],
+            },
+          },
         },
       },
       { $sort: { _id: 1 } },
@@ -80,40 +102,47 @@ export const getCompanyAnalytics = async (req, res) => {
       const d = new Date();
       d.setDate(d.getDate() - (daysInt - 1) + i);
       const key = d.toISOString().split('T')[0];
-      const found = submissionsByDayAgg.find(x => x._id === key);
-      submissionsByDay.push({ date: key, count: found ? found.count : 0 });
+      const found = submissionsByDayAgg.find((x) => x._id === key);
+      submissionsByDay.push({
+        date: key,
+        count: found ? found.count : 0,
+        qualified: found ? found.qualified : 0,
+      });
     }
 
-    // Upcoming follow-ups: unwind followUps and paginate, sorted by nextFollowUpDate asc
+    // ─── Upcoming follow-ups (paginated) ───────────────────────────────────
     const followUpPipeline = [
       { $match: buildLeadScopeMatch(req) },
       { $unwind: '$followUps' },
       { $match: { 'followUps.nextFollowUpDate': { $exists: true, $ne: null } } },
-      { $project: {
-        _id: 0,
-        leadId: '$_id',
-        leadName: '$name',
-        leadEmail: '$email',
-        leadPhone: '$phone',
-        nextFollowUpDate: '$followUps.nextFollowUpDate',
-        note: '$followUps.note',
-        followUpCreatedBy: '$followUps.createdBy',
-      } },
+      {
+        $project: {
+          _id: 0,
+          leadId: '$_id',
+          leadName: '$name',
+          leadEmail: '$email',
+          leadPhone: '$phone',
+          nextFollowUpDate: '$followUps.nextFollowUpDate',
+          note: '$followUps.note',
+          followUpCreatedBy: '$followUps.createdBy',
+        },
+      },
       { $sort: { nextFollowUpDate: 1 } },
-      { $facet: {
-        metadata: [{ $count: 'total' }],
-        data: [{ $skip: skip }, { $limit: lim }]
-      } },
+      {
+        $facet: {
+          metadata: [{ $count: 'total' }],
+          data: [{ $skip: skip }, { $limit: lim }],
+        },
+      },
     ];
 
     const followUpResult = await Lead.aggregate(followUpPipeline);
-    const totalFollowUps = (followUpResult[0]?.metadata?.[0]?.total) || 0;
+    const totalFollowUps = followUpResult[0]?.metadata?.[0]?.total || 0;
     const followUps = followUpResult[0]?.data || [];
 
-    // Try to compute open tickets if there is a SupportTicket model present
+    // ─── Open Tickets ──────────────────────────────────────────────────────
     let openTickets = 0;
     try {
-      // dynamic import to avoid hard dependency if model not present
       const SupportTicketModel = (await import('../models/SupportTicket.js')).default;
       openTickets = await SupportTicketModel.countDocuments(
         isAdminUser(req.user)
@@ -121,19 +150,33 @@ export const getCompanyAnalytics = async (req, res) => {
           : { companyId, status: { $ne: 'Closed' }, $or: [{ createdBy: req.user._id }, { assignedTo: req.user._id }] }
       );
     } catch (e) {
-      // model not found -> default to 0
       openTickets = 0;
     }
 
     return sendResponse(res, 200, true, 'Analytics fetched successfully', {
+      // ── Totals ──
       totalLeads,
-      websiteTotalLeads: totalLeads, // Assuming all leads are from website for now, can be adjusted if source field is added
+      websiteTotalLeads: totalLeads,
       activeFormsCount,
+      openTickets,
+
+      // ── Status counts (stat cards) ──
+      newLeads,
+      qualifiedLeads,
+      openCases,
+      inConversation,
+      convertedLeads,
+      lostLeads,
+
+      // ── Grouped data ──
       leadsByStatus,
+      leadsBySource,
       submissionsByDay,
+
+      // ── Follow-ups ──
       upcomingFollowUps: followUps,
       totalFollowUps,
-      openTickets,
+
       page: parseInt(page),
       perPage: parseInt(limit),
     });
