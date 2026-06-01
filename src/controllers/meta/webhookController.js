@@ -32,6 +32,8 @@ export const verifyWebhook = (req, res) => {
 // 2. Receive Events via Webhook (POST Request)
 export const handleWebhookEvent = async (req, res) => {
   const body = req.body;
+  console.log("hit recive-------------------------------------------------------------------------------------------------------------");
+  console.log("data is---", req.body)
 
   if (body.object === "instagram") {
     
