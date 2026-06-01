@@ -1,7 +1,12 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
+import dotenv from "dotenv";
 
-// Ensure GEMINI_API_KEY is in your .env
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+dotenv.config();
+
+// Ensure OPENAI_API_KEY is in your .env
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 /**
  * Generate AI Reply based on Startup Data and Platform
@@ -12,10 +17,8 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
  */
 export const generateAIReply = async (incomingMessage, startupData, platform = "Instagram", postCaption = "") => {
   try {
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-    // Base System Prompt
-    let prompt = `
+    // System Prompt: Setting up the AI's role, context, and rules
+    let systemPrompt = `
       You are an AI customer support assistant for a business named "${startupData.businessName}".
       Your tone of voice should be strictly: ${startupData.tone}.
       
@@ -34,7 +37,7 @@ export const generateAIReply = async (incomingMessage, startupData, platform = "
 
     // 🔥 DYNAMIC CONTEXT: Agar ye Instagram Comment hai, toh extra rules lagao
     if (platform === "Instagram Comment") {
-      prompt += `
+      systemPrompt += `
       IMPORTANT INSTRUCTIONS FOR PUBLIC COMMENTS:
       1. The user is commenting on a post with this caption: "${postCaption}".
       2. Read the post caption to understand what the user is asking about.
@@ -43,18 +46,21 @@ export const generateAIReply = async (incomingMessage, startupData, platform = "
       `;
     }
 
-    // Attach Customer Message
-    prompt += `
-      Customer's message: "${incomingMessage}"
-      
-      Your response:
-    `;
+    // Call OpenAI API
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Customer's message: "${incomingMessage}"\n\nYour response:` }
+      ],
+      temperature: 0.7, // Adjust this to make it more creative (1.0) or more strict (0.0)
+    });
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
+    // Extract the reply text
+    const replyText = response.choices[0].message.content;
     
     // Extra safety: Remove markdown formatting just in case the AI ignores the instruction
-    let cleanText = response.text().replace(/\*/g, '').trim();
+    let cleanText = replyText.replace(/\*/g, '').trim();
     
     return cleanText;
   } catch (error) {
