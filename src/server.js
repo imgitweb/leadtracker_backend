@@ -7,6 +7,8 @@ import mongoStore from 'connect-mongo';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import path from 'path';
+import { Server } from 'socket.io';
+import http from 'http';
 import { fileURLToPath } from 'url';
 
 // Load environment variables
@@ -28,10 +30,12 @@ import contactRoutes from './routes/contact.js';
 import leadRoutes from './routes/lead.js';
 import formRoutes from './routes/forms.js';
 import analyticsRoutes from './routes/analytics.js';
+import knowledgeRepositoryRoutes from './routes/knowledgeRepository.js';
 import superAdminRoutes from './superadmin/routes/superAdminRoutes.js';
 import { CompanyModuleService } from './services/CompanyModuleService.js';
 import aiRoutes from "./routes/aiRoutes.js";
 import chatRoutes from './routes/chatRoutes.js';
+import supportTicketRoutes from './routes/supportTickets.js';
 
 import instagramAuth from './routes/meta/instagramAuth.js';
 import instagramDataRoutes from './routes/meta/instagramDataRoutes.js';
@@ -54,6 +58,21 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 // Connect to database
+const server = http.createServer(app);
+
+
+const io = new Server(server, {
+  cors: {
+    origin: ["http://localhost:5173", "https://localhost:5173","https://cinfy.co","https://crm.cinfy.co"], 
+    methods: ["GET", "POST"]
+  }
+});
+
+
+app.set('socketio', io);
+
+
+
 await connectDB();
 await CompanyModuleService.syncAllCompanies();
 
@@ -64,7 +83,12 @@ app.use(helmet({
   crossOriginResourcePolicy: false,
 }));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173' || "https://steam-nicholas-market-chrome.trycloudflare.com",
+  origin:[
+   "http://localhost:5173",
+   "https://localhost:5173",
+   "https://cinfy.co",
+   "https://crm.cinfy.co"
+ ],
   credentials: true,
 }));
 
@@ -123,10 +147,12 @@ app.use('/api/lead', leadRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/knowledge-repository', knowledgeRepositoryRoutes);
 app.use('/api/superadmin', superAdminRoutes);
 
 app.use('/api/ai', aiRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/support-tickets', supportTicketRoutes);
 
 app.use('/api/insta', instagramAuth);
 app.use('/api/insta-data', instagramDataRoutes);
@@ -144,11 +170,21 @@ app.use("/api/webhook/whatsapp", whatsappWebhookRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
+// ============ SOCKET.IO CONNECTION ============
+io.on('connection', (socket) => {
+  console.log(`🟢 New Client Connected: ${socket.id}`);
+  
+  socket.on('disconnect', () => {
+    console.log(`🔴 Client Disconnected: ${socket.id}`);
+  });
+});
+
+
 // ============ START SERVER ============
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`
   ╔════════════════════════════════════════╗
   ║   🚀 Cinfy Lead Tracker API Running   ║

@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import { sendResponse, sendError } from '../utils/helpers.js';
 import AuditLog from '../models/AuditLog.js';
 import Form from '../models/Form.js';
+import SupportTicket from '../models/SupportTicket.js';
 
 const ADMIN_ROLES = ['admin', 'super_admin'];
 
@@ -22,12 +23,6 @@ const buildLeadAccessQuery = (req) => {
 
   return query;
 };
-
-/**
- * Lead Controller
- * Manages lead submissions and enforces plan-based limits.
- */
-
 // Get all leads for the current company
 export const getLeads = async (req, res) => {
   try {
@@ -47,7 +42,6 @@ export const getLeads = async (req, res) => {
     sendError(res, 500, error.message);
   }
 };
-
 // Create a new lead
 export const createLead = async (req, res) => {
   try {
@@ -139,7 +133,6 @@ export const createLead = async (req, res) => {
     sendError(res, 400, error.message);
   }
 };
-
 // Get single lead details
 export const getLeadDetails = async (req, res) => {
   try {
@@ -158,7 +151,6 @@ export const getLeadDetails = async (req, res) => {
     sendError(res, 500, error.message);
   }
 };
-
 // Update lead
 export const updateLead = async (req, res) => {
   try {
@@ -180,12 +172,34 @@ export const updateLead = async (req, res) => {
       details: { leadId: lead._id, name: lead.name }
     });
 
+    // ── Auto-create Support Ticket when status changes to 'Support' ──────────
+    if (req.body.status === 'Support') {
+      const existingTicket = await SupportTicket.findOne({
+        leadId: lead._id,
+        companyId: req.user.company._id,
+      });
+
+      if (!existingTicket) {
+        await SupportTicket.create({
+          companyId: req.user.company._id,
+          leadId: lead._id,
+          subject: `Support: ${lead.name || lead.email || 'Lead'}`,
+          description: `Auto-created ticket for lead ${lead.name || lead.email || lead._id}. Please review and assign.`,
+          category: 'General',
+          priority: lead.priority || 'Medium',
+          status: 'Open',
+          createdBy: req.user._id,
+          assignedTo: lead.assignedTo || [],
+        });
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     sendResponse(res, 200, true, 'Lead updated successfully', { contact: lead });
   } catch (error) {
     sendError(res, 400, error.message);
   }
 };
-
 // Delete lead
 export const deleteLead = async (req, res) => {
   try {
@@ -208,7 +222,6 @@ export const deleteLead = async (req, res) => {
     sendError(res, 500, error.message);
   }
 };
-
 // Add Remark
 export const addRemark = async (req, res) => {
   try {
@@ -238,7 +251,6 @@ export const addRemark = async (req, res) => {
     sendError(res, 400, error.message);
   }
 };
-
 // Update Lead Status
 export const updateLeadStatus = async (req, res) => {
   try {
@@ -264,7 +276,6 @@ export const updateLeadStatus = async (req, res) => {
     sendError(res, 400, error.message);
   }
 };
-
 // Update Lead Priority
 export const updateLeadPriority = async (req, res) => {
   try {
@@ -290,7 +301,6 @@ export const updateLeadPriority = async (req, res) => {
     sendError(res, 400, error.message);
   }
 };
-
 // Add Follow Up
 export const addFollowUp = async (req, res) => {
   try {
@@ -332,7 +342,6 @@ export const addFollowUp = async (req, res) => {
     sendError(res, 400, error.message);
   }
 };
-
 // Assign Lead
 export const assignLead = async (req, res) => {
   try {
