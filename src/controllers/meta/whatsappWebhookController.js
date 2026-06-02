@@ -13,6 +13,7 @@ const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN;
 
 // 1. Verify Webhook (GET)
 export const verifyWaWebhook = (req, res) => {
+  console.log("verify ---")
   if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
     res.status(200).send(req.query["hub.challenge"]);
   } else {
@@ -23,6 +24,7 @@ export const verifyWaWebhook = (req, res) => {
 // 2. Handle Incoming Webhook Events (POST)
 export const handleWaWebhook = async (req, res) => {
   const body = req.body;
+   console.log("webhook hit  ---")
 
   if (body.object === "whatsapp_business_account") {
     for (const entry of body.entry) {
