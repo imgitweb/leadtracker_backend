@@ -88,9 +88,9 @@ app.use(cors({
    "https://localhost:5173",
    "https://cinfy.co",
    "https://crm.cinfy.co",
-    "http://app.yogshala.ai",
-    "https://yogshala.ai",
-    
+  "http://app.yogshala.ai",
+  "https://yogshala.ai",
+
  ],
   credentials: true,
 }));
