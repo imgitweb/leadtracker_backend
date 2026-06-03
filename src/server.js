@@ -48,6 +48,7 @@ import whatsappAuthRoutes from "./routes/meta/whatsappAuthRoutes.js";
 import whatsappDataRoutes from "./routes/meta/whatsappDataRoutes.js";
 import whatsappWebhookRoutes from "./routes/meta/whatsappWebhookRoutes.js";
 
+import metaAdsAuthRoutes from "./routes/meta/metaAdsAuthRoutes.js";
 
 import webhookRoutes from "./routes/meta/webhookRoutes.js";
 
@@ -87,7 +88,10 @@ app.use(cors({
    "http://localhost:5173",
    "https://localhost:5173",
    "https://cinfy.co",
-   "https://crm.cinfy.co"
+   "https://crm.cinfy.co",
+  "http://app.yogshala.ai",
+  "https://yogshala.ai",
+
  ],
   credentials: true,
 }));
@@ -165,6 +169,8 @@ app.use("/api/webhook/facebook", facebookWebhookRoutes);
 app.use("/api/wa/auth", whatsappAuthRoutes);
 app.use("/api/wa-data", whatsappDataRoutes);
 app.use("/api/webhook/whatsapp", whatsappWebhookRoutes);
+
+app.use("/api/meta-ads", metaAdsAuthRoutes);
 
 // Error handling
 app.use(notFound);
