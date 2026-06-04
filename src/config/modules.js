@@ -6,6 +6,7 @@ export const MODULE_DEFINITIONS = Object.freeze([
   { key: 'automation', label: 'Automation', description: 'Workflow and automation builder', defaultEnabled: true },
   { key: 'settings', label: 'Settings', description: 'Company and user settings', defaultEnabled: true },
   { key: 'integrations', label: 'Integrations', description: 'Linked accounts and channels', defaultEnabled: true },
+  { key: 'bulk_email', label: 'Bulk Email', description: 'SMTP-driven email campaigns and templates', defaultEnabled: true, group: 'Communication' },
   { key: 'ai_integration', label: 'AI Integration', description: 'AI setup and auto-reply tools', defaultEnabled: true },
   { key:"instagram_leads", label: "Instagram Leads", description: "Manage Instagram lead generation", defaultEnabled: true },
   { key:"facebook_leads", label: "Facebook Leads", description: "Manage Facebook lead generation", defaultEnabled: true },

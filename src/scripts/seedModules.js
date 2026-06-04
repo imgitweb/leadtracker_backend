@@ -25,6 +25,8 @@ const seedModules = async () => {
 
     const syncKeys = new Set(MODULE_KEYS);
 
+    await CompanyModuleService.syncSystemModules();
+
     for (const mod of MODULE_DEFINITIONS) {
       await SystemModule.findOneAndUpdate(
         { key: mod.key },
