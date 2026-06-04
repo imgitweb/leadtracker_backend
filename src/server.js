@@ -32,7 +32,9 @@ import formRoutes from './routes/forms.js';
 import analyticsRoutes from './routes/analytics.js';
 import knowledgeRepositoryRoutes from './routes/knowledgeRepository.js';
 import superAdminRoutes from './superadmin/routes/superAdminRoutes.js';
+import bulkEmailRoutes from './routes/bulkEmail.js';
 import { CompanyModuleService } from './services/CompanyModuleService.js';
+import { BulkEmailService } from './services/BulkEmailService.js';
 import aiRoutes from "./routes/aiRoutes.js";
 import chatRoutes from './routes/chatRoutes.js';
 import supportTicketRoutes from './routes/supportTickets.js';
@@ -64,7 +66,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173", "https://localhost:5173","https://cinfy.co","https://crm.cinfy.co"], 
+    origin: ["http://localhost:5173", "https://localhost:5173", "https://cinfy.co", "https://crm.cinfy.co"],
     methods: ["GET", "POST"]
   }
 });
@@ -75,7 +77,14 @@ app.set('socketio', io);
 
 
 await connectDB();
+await CompanyModuleService.syncSystemModules();
 await CompanyModuleService.syncAllCompanies();
+
+setInterval(() => {
+  BulkEmailService.dispatchDueCampaigns().catch((error) => {
+    console.error('Bulk email dispatcher error:', error.message);
+  });
+}, 60 * 1000);
 
 // ============ MIDDLEWARE ============
 
@@ -84,15 +93,16 @@ app.use(helmet({
   crossOriginResourcePolicy: false,
 }));
 app.use(cors({
-  origin:[
-   "http://localhost:5173",
-   "https://localhost:5173",
-   "https://cinfy.co",
-   "https://crm.cinfy.co",
-  "http://app.yogshala.ai",
-  "https://yogshala.ai",
+  origin: [
+    "http://localhost:5173",
+    "https://localhost:5173",
+    "https://localhost:5173/",
+    "https://cinfy.co",
+    "https://crm.cinfy.co",
+    "http://app.yogshala.ai",
+    "https://yogshala.ai",
 
- ],
+  ],
   credentials: true,
 }));
 
@@ -137,10 +147,11 @@ app.use(auditLog);
 // ============ ROUTES ============
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'API is running', 
+  res.json({
+    status: 'API is running',
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
-   });
+  });
 });
 
 // API routes
@@ -153,6 +164,7 @@ app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/knowledge-repository', knowledgeRepositoryRoutes);
 app.use('/api/superadmin', superAdminRoutes);
+app.use('/api/bulk-email', bulkEmailRoutes);
 
 app.use('/api/ai', aiRoutes);
 app.use('/api/chat', chatRoutes);
@@ -179,7 +191,7 @@ app.use(errorHandler);
 // ============ SOCKET.IO CONNECTION ============
 io.on('connection', (socket) => {
   console.log(`🟢 New Client Connected: ${socket.id}`);
-  
+
   socket.on('disconnect', () => {
     console.log(`🔴 Client Disconnected: ${socket.id}`);
   });
