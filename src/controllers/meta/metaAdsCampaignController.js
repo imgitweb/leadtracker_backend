@@ -314,32 +314,35 @@ export const getAllCampaigns = async (req, res) => {
   try {
     const userId = req.user._id;
     const { adAccountId } = req.query;
+
     if (!adAccountId) {
       return res.status(400).json({
         success: false,
-        message: "adAccountId is required ",
+        message: "adAccountId is required",
       });
     }
 
-    const metaCampaigns = await MetaAdCampaign.find({
+    const existingCampaigns = await MetaAdCampaign.find({
       userId,
       adAccountId,
     })
-      .select("status campaignName campaignId objective status")
+      .select(
+        "campaignId campaignName status objective buying_type created_time",
+      )
       .lean();
 
-    if (metaCampaigns.length !== 0) {
+    if (existingCampaigns.length > 0) {
       return res.status(200).json({
         success: true,
         message: "Campaigns fetched successfully",
-        campaigns: metaCampaigns,
-        count: metaCampaigns.length,
+        campaigns: existingCampaigns,
+        count: existingCampaigns.length,
       });
     }
 
     const metaAdAccount = await MetaAdAccount.findOne({
-      userId: new mongoose.Types.ObjectId(userId),
-      adAccountId: adAccountId,
+      userId,
+      adAccountId,
     }).select("adAccountId userAccessToken");
 
     if (!metaAdAccount) {
@@ -349,7 +352,7 @@ export const getAllCampaigns = async (req, res) => {
       });
     }
 
-    const campaignsResponse = await axios.get(
+    const { data } = await axios.get(
       `${META_API}/${metaAdAccount.adAccountId}/campaigns`,
       {
         params: {
@@ -359,44 +362,51 @@ export const getAllCampaigns = async (req, res) => {
       },
     );
 
-    const campaigns = campaignsResponse.data.data || [];
-    console.log(campaigns);
-    const data = await MetaAdCampaign.bulkWrite(
-      campaigns.map((camp) => ({
-        updateOne: {
-          filter: {
-            campaignId: camp.id,
-          },
-          update: {
-            $set: {
-              userId: userId,
-              adAccountId: metaAdAccount.adAccountId,
-              campaignName: camp.name,
-              campaignId: camp.id,
-              status: camp.status,
-              buying_type: camp.buying_type,
-              objective: camp.objective,
-              created_time: camp.created_time,
-            },
-          },
-          upsert: true,
-        },
-      })),
-    );
+    const campaigns = data?.data || [];
 
-    console.log(data[0]);
+    if (campaigns.length > 0) {
+      await MetaAdCampaign.bulkWrite(
+        campaigns.map((camp) => ({
+          updateOne: {
+            filter: {
+              userId,
+              adAccountId: metaAdAccount.adAccountId,
+              campaignId: camp.id,
+            },
+            update: {
+              $set: {
+                userId,
+                adAccountId: metaAdAccount.adAccountId,
+                campaignId: camp.id,
+                campaignName: camp.name,
+                status: camp.status,
+                objective: camp.objective,
+                buying_type: camp.buying_type,
+                created_time: camp.created_time,
+              },
+            },
+            upsert: true,
+          },
+        })),
+      );
+    }
+
+    const savedCampaigns = await MetaAdCampaign.find({
+      userId,
+      adAccountId,
+    })
+      .select(
+        "campaignId campaignName status objective buying_type created_time",
+      )
+      .lean();
 
     return res.status(200).json({
       success: true,
-      campaigns: campaigns,
-      count: campaigns.length,
+      message: "Campaigns fetched successfully",
+      campaigns: savedCampaigns,
+      count: savedCampaigns.length,
     });
   } catch (error) {
-    console.error(
-      "Get campaigns error:",
-      error.response?.data || error.message,
-    );
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch campaigns",
