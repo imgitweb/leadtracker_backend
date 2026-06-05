@@ -416,66 +416,216 @@ export const refreshTemplateStatus = async (req, res) => {
 // };
 
 // Helper function — {{1}}, {{2}} ko actual values se replace karo
+// const resolveTemplateText = (template, variables = []) => {
+//   const bodyComponent = template.components.find(c => c.type === "BODY");
+//   if (!bodyComponent) return `[Template: ${template.name}]`;
+
+//   let text = bodyComponent.text;
+
+//   // {{1}}, {{2}} replace karo actual variable values se
+//   variables.forEach((val, index) => {
+//     text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), val || "");
+//   });
+
+//   return text;
+// };
+
+
+
+// export const sendBulkWaTemplate = async (req, res) => {
+//   try {
+//     const { phoneId } = req.params;
+//     const { templateName, language, recipients } = req.body;
+//     const userId = req.user._id;
+
+//     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+//     if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
+
+//     // Template ek baar fetch karo — sabke liye same template use hogi
+//     const template = await WhatsAppTemplate.findOne({ 
+//       phone_number_id: phoneId, 
+//       name: templateName 
+//     });
+//     if (!template) return res.status(404).json({ error: "Template not found." });
+
+//     const results = { total: recipients.length, success: 0, failed: 0, errors: [] };
+
+//     for (const rec of recipients) {
+//       try {
+//         // --- 1. Build Meta API payload ---
+//         const components = [];
+//         if (rec.variables && rec.variables.length > 0) {
+//           components.push({
+//             type: "body",
+//             parameters: rec.variables.map(val => ({
+//               type: "text",
+//               text: val || " ",
+//             })),
+//           });
+//         }
+
+//         const payload = {
+//           messaging_product: "whatsapp",
+//           to: rec.phone,
+//           type: "template",
+//           template: {
+//             name: templateName,
+//             language: { code: language },
+//             components: components.length > 0 ? components : undefined,
+//           },
+//         };
+
+//         // --- 2. Send to Meta ---
+//         await axios.post(
+//           `https://graph.facebook.com/v23.0/${phoneId}/messages`,
+//           payload,
+//           {
+//             headers: {
+//               Authorization: `Bearer ${account.access_token}`,
+//               "Content-Type": "application/json",
+//             },
+//           }
+//         );
+
+//         // --- 3. Variables replace karke actual text banao ---
+//         // "Hello {{1}}, your order {{2}}" → "Hello Rahul, your order #123"
+//         const resolvedText = resolveTemplateText(template, rec.variables || []);
+
+//         // --- 4. Conversation find karo ya naya banao ---
+//         const conversationUpdate = {
+//           $set: {
+//             last_message: resolvedText, // actual text store hoga
+//             last_message_time: new Date(),
+//           },
+//           $setOnInsert: {
+//             phone_number_id: phoneId,
+//             customer_phone: rec.phone,
+//             customer_name: rec.name || "WA User",
+//             ai_enabled: true,
+//           },
+//         };
+
+//         if (rec.name) {
+//           conversationUpdate.$set.customer_name = rec.name;
+//         }
+
+//         const conversation = await WhatsAppConversation.findOneAndUpdate(
+//           { phone_number_id: phoneId, customer_phone: rec.phone },
+//           conversationUpdate,
+//           { upsert: true, new: true }
+//         );
+
+//         // --- 5. Message save karo actual text ke saath ---
+//         await WhatsAppMessage.create({
+//           conversation_id: conversation._id,
+//           sender_id: phoneId,
+//           receiver_id: rec.phone,
+//           text: resolvedText,         // "Hello Rahul, your order #123 is confirmed!"
+//           is_from_me: true,
+//           is_read: true,
+//           message_type: "template",
+//           template_name: templateName,
+//         });
+
+//         results.success++;
+//       } catch (err) {
+//         results.failed++;
+//         const errorMsg = err.response?.data?.error?.message || err.message || "Unknown error";
+//         results.errors.push({ phone: rec.phone, error: errorMsg });
+//       }
+//     }
+
+//     res.status(200).json({
+//       success: true,
+//       message: `Bulk send done. Success: ${results.success}, Failed: ${results.failed}`,
+//       results,
+//     });
+
+//   } catch (error) {
+//     console.error("Bulk Send Error:", error);
+//     res.status(500).json({ error: "Failed to process bulk template sending." });
+//   }
+// };
+
+
 const resolveTemplateText = (template, variables = []) => {
-  const bodyComponent = template.components.find(c => c.type === "BODY");
-  if (!bodyComponent) return `[Template: ${template.name}]`;
+  try {
+    // Standardizing to lower case checking (handles 'BODY' or 'body' safely)
+    const bodyComponent = template?.components?.find(c => c.type?.toLowerCase() === "body");
+    if (!bodyComponent || !bodyComponent.text) return `[Template: ${template?.name || 'WhatsApp Template'}]`;
 
-  let text = bodyComponent.text;
+    let text = bodyComponent.text;
 
-  // {{1}}, {{2}} replace karo actual variable values se
-  variables.forEach((val, index) => {
-    text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), val || "");
-  });
+    // {{1}}, {{2}} ko runtime dynamic input string values se replace karega
+    variables.forEach((val, index) => {
+      text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), val || "");
+    });
 
-  return text;
+    return text;
+  } catch (err) {
+    console.error("Error resolving template text layout calculation:", err);
+    return "Template message processed and sent.";
+  }
 };
-
-
 
 export const sendBulkWaTemplate = async (req, res) => {
   try {
     const { phoneId } = req.params;
     const { templateName, language, recipients } = req.body;
-    const userId = req.user._id;
+    const userId = req.user?._id; // Added safe optional chaining navigation
 
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: "Recipients data array is mandatory and cannot be empty." });
+    }
+
+    // Account check optimization layer
     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
-    if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
+    if (!account) return res.status(404).json({ error: "WhatsApp integration account configuration not found." });
 
-    // Template ek baar fetch karo — sabke liye same template use hogi
+    // Fetch Template Layout structure exactly once outside execution iteration boundaries
     const template = await WhatsAppTemplate.findOne({ 
       phone_number_id: phoneId, 
       name: templateName 
     });
-    if (!template) return res.status(404).json({ error: "Template not found." });
+    if (!template) return res.status(404).json({ error: "Template structure metadata layout records not found." });
 
     const results = { total: recipients.length, success: 0, failed: 0, errors: [] };
 
     for (const rec of recipients) {
       try {
-        // --- 1. Build Meta API payload ---
+        if (!rec.phone) {
+          results.failed++;
+          results.errors.push({ phone: "Unknown Target", error: "Missing mobile phone target parameter." });
+          continue;
+        }
+
+        // Clean phone number: Removes spaces, dashes, +, etc. (keeps only digits)
+        const cleanedPhone = String(rec.phone).replace(/[^0-9]/g, '');
+
+        // --- 1. Build Meta API payload dynamic structural elements ---
         const components = [];
         if (rec.variables && rec.variables.length > 0) {
           components.push({
             type: "body",
             parameters: rec.variables.map(val => ({
               type: "text",
-              text: val || " ",
+              text: String(val || " "), // Strictly string-casted backup for structural parameters boundary
             })),
           });
         }
 
         const payload = {
           messaging_product: "whatsapp",
-          to: rec.phone,
+          to: cleanedPhone, // Using sanitized numeric values
           type: "template",
           template: {
             name: templateName,
-            language: { code: language },
+            language: { code: language || "en" },
             components: components.length > 0 ? components : undefined,
           },
         };
 
-        // --- 2. Send to Meta ---
+        // --- 2. Dispatch Call To Meta Graph Cloud Gateway ---
         await axios.post(
           `https://graph.facebook.com/v23.0/${phoneId}/messages`,
           payload,
@@ -484,22 +634,22 @@ export const sendBulkWaTemplate = async (req, res) => {
               Authorization: `Bearer ${account.access_token}`,
               "Content-Type": "application/json",
             },
+            timeout: 12000 // Boundary ceiling timeout setup to prevent total event pool lock
           }
         );
 
-        // --- 3. Variables replace karke actual text banao ---
-        // "Hello {{1}}, your order {{2}}" → "Hello Rahul, your order #123"
+        // --- 3. Replace dynamic placeholders using top helper for system logs tracking ---
         const resolvedText = resolveTemplateText(template, rec.variables || []);
 
-        // --- 4. Conversation find karo ya naya banao ---
+        // --- 4. Atomic Upsert Matrix Synchronization for chat threads ---
         const conversationUpdate = {
           $set: {
-            last_message: resolvedText, // actual text store hoga
+            last_message: resolvedText, 
             last_message_time: new Date(),
           },
           $setOnInsert: {
             phone_number_id: phoneId,
-            customer_phone: rec.phone,
+            customer_phone: cleanedPhone,
             customer_name: rec.name || "WA User",
             ai_enabled: true,
           },
@@ -510,17 +660,17 @@ export const sendBulkWaTemplate = async (req, res) => {
         }
 
         const conversation = await WhatsAppConversation.findOneAndUpdate(
-          { phone_number_id: phoneId, customer_phone: rec.phone },
+          { phone_number_id: phoneId, customer_phone: cleanedPhone },
           conversationUpdate,
           { upsert: true, new: true }
         );
 
-        // --- 5. Message save karo actual text ke saath ---
+        // --- 5. Commit Entry tracking log inside individual Message Collection schema ---
         await WhatsAppMessage.create({
           conversation_id: conversation._id,
           sender_id: phoneId,
-          receiver_id: rec.phone,
-          text: resolvedText,         // "Hello Rahul, your order #123 is confirmed!"
+          receiver_id: cleanedPhone,
+          text: resolvedText,
           is_from_me: true,
           is_read: true,
           message_type: "template",
@@ -530,20 +680,21 @@ export const sendBulkWaTemplate = async (req, res) => {
         results.success++;
       } catch (err) {
         results.failed++;
-        const errorMsg = err.response?.data?.error?.message || err.message || "Unknown error";
-        results.errors.push({ phone: rec.phone, error: errorMsg });
+        const errorMsg = err.response?.data?.error?.message || err.message || "Pipeline processing exception.";
+        results.errors.push({ phone: rec.phone || "Unknown Target", error: errorMsg });
       }
     }
 
+    // Standard structural payload compilation return
     res.status(200).json({
       success: true,
-      message: `Bulk send done. Success: ${results.success}, Failed: ${results.failed}`,
+      message: `Bulk transmission finished processing. Success: ${results.success}, Failed: ${results.failed}`,
       results,
     });
 
   } catch (error) {
-    console.error("Bulk Send Error:", error);
-    res.status(500).json({ error: "Failed to process bulk template sending." });
+    console.error("Critical System Bulk Template Sender Route Crash Error:", error);
+    res.status(500).json({ error: "Failed to process bulk template campaign transmission sequence." });
   }
 };
 
