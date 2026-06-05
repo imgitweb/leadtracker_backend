@@ -22,41 +22,50 @@ export const syncAdAccounts = async (req, res) => {
     // 1. Generate Long-Lived Token
     let longLivedToken = accessToken;
     try {
-      const tokenExchangeRes = await axios.get("https://graph.facebook.com/v25.0/oauth/access_token", {
-        params: {
-          grant_type: "fb_exchange_token",
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
-          fb_exchange_token: accessToken,
+      const tokenExchangeRes = await axios.get(
+        "https://graph.facebook.com/v25.0/oauth/access_token",
+        {
+          params: {
+            grant_type: "fb_exchange_token",
+            client_id: CLIENT_ID,
+            client_secret: CLIENT_SECRET,
+            fb_exchange_token: accessToken,
+          },
         },
-      });
+      );
       longLivedToken = tokenExchangeRes.data.access_token;
     } catch (tokenErr) {
-      console.error("Token Exchange Failed:", tokenErr.response?.data || tokenErr.message);
+      console.error(
+        "Token Exchange Failed:",
+        tokenErr.response?.data || tokenErr.message,
+      );
     }
 
     // 2. Fetch all Ad Accounts from Meta API
-    const adAccountsRes = await axios.get("https://graph.facebook.com/v25.0/me/adaccounts", {
-      params: {
-        access_token: longLivedToken,
-        fields: "id,name,account_status",
-        limit: 100
+    const adAccountsRes = await axios.get(
+      "https://graph.facebook.com/v25.0/me/adaccounts",
+      {
+        params: {
+          access_token: longLivedToken,
+          fields: "id,name,account_status",
+          limit: 100,
+        },
       },
-    });
+    );
 
     const accountsFromMeta = adAccountsRes.data.data;
 
     if (!accountsFromMeta || accountsFromMeta.length === 0) {
-      return res.status(200).json({ 
-        success: true, 
-        message: "No Ad Accounts found on Meta.", 
-        accounts: [] 
+      return res.status(200).json({
+        success: true,
+        message: "No Ad Accounts found on Meta.",
+        accounts: [],
       });
     }
 
     // 3. STORE ALL FETCHED ACCOUNTS IN DATABASE (Loop & Upsert)
     const savedAccounts = [];
-    
+
     for (const acc of accountsFromMeta) {
       const savedAcc = await MetaAdAccount.findOneAndUpdate(
         { userId: userId, adAccountId: acc.id }, // Find by user + ad account id
@@ -65,10 +74,10 @@ export const syncAdAccounts = async (req, res) => {
           userAccessToken: longLivedToken,
           adAccountId: acc.id,
           name: acc.name || "Unnamed Account",
-          accountStatus: acc.account_status
+          accountStatus: acc.account_status,
           // linkedPageId abhi null rahega, jab tak user UI se page map nahi karta
         },
-        { new: true, upsert: true } // Upsert: Naya hai toh create karo, purana hai toh update karo
+        { new: true, upsert: true }, // Upsert: Naya hai toh create karo, purana hai toh update karo
       );
       savedAccounts.push(savedAcc);
     }
@@ -79,33 +88,40 @@ export const syncAdAccounts = async (req, res) => {
       message: "All Ad Accounts synced and saved to Database successfully!",
       accounts: savedAccounts, // Yeh direct Database ka data hai
     });
-
   } catch (error) {
-    console.error("Sync Ad Accounts Error:", error.response?.data || error.message);
+    console.error(
+      "Sync Ad Accounts Error:",
+      error.response?.data || error.message,
+    );
     if (error.response?.data?.error) {
-        return res.status(400).json({ error: `Meta Error: ${error.response.data.error.message}` });
+      return res
+        .status(400)
+        .json({ error: `Meta Error: ${error.response.data.error.message}` });
     }
     return res.status(500).json({ error: "Failed to sync Ad Accounts." });
   }
 };
-
 
 // ==================================================
 // NEW: GET ALL SAVED AD ACCOUNTS FROM DATABASE
 // ==================================================
 export const getSavedAdAccounts = async (req, res) => {
   try {
-    const userId = req.user._id; // JWT Middleware se mila
+    const userId = req.user._id;
+    console.log("$$$", userId);
 
-    // Database se user ke saare saved accounts nikalna
-    const savedAccounts = await MetaAdAccount.find({ userId }).sort({ createdAt: -1 });
+    const savedAccounts = await MetaAdAccount.find({ userId }).sort({
+      createdAt: -1,
+    });
 
     return res.status(200).json({
       success: true,
-      accounts: savedAccounts || []
+      accounts: savedAccounts || [],
     });
   } catch (error) {
     console.error("Get Saved Accounts DB Error:", error.message);
-    return res.status(500).json({ error: "Failed to fetch saved accounts from database." });
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch saved accounts from database." });
   }
 };
