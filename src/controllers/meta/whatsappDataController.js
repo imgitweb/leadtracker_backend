@@ -104,7 +104,8 @@ export const toggleWaConversationAI = async (req, res) => {
 // ==========================================
 export const createWhatsAppTemplate = async (req, res) => {
   try {
-    const { phoneId, templateName, category, language, headerText, bodyText, footerText, buttons } = req.body;
+    console.log("req.body - - - - - - - - - - - - -",req.body)
+    const { phoneId, name, category, language, headerText, bodyText, footerText, buttons } = req.body;
     const userId = req.user._id;
 
     // Database se waba_id nikalna
@@ -162,7 +163,7 @@ export const createWhatsAppTemplate = async (req, res) => {
     }
 
     const templatePayload = {
-      name: templateName,
+      name: name,
       language: language,
       category: category,
       components: components
@@ -175,7 +176,7 @@ export const createWhatsAppTemplate = async (req, res) => {
 
     // Send to Meta Graph API
     const response = await axios.post(
-      `https://graph.facebook.com/v23.0/${waba_id}/message_templates`,
+      `https://graph.facebook.com/v25.0/${waba_id}/message_templates`,
       templatePayload,
       { headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" } }
     );
@@ -186,7 +187,7 @@ export const createWhatsAppTemplate = async (req, res) => {
       phone_number_id: phoneId,
       waba_id,
       meta_template_id: response.data.id,
-      name: templateName,
+      name: name,
       language: language,
       category: category,
       components: components,

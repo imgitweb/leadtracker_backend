@@ -1,48 +1,70 @@
 import axios from "axios";
 import dotenv from 'dotenv';
+
+// Facebook Models
 import FacebookConversation from "../../models/FacebookConversation.js";
 import FacebookMessage from "../../models/FacebookMessage.js";
 import FacebookAccount from "../../models/FacebookAccount.js";
+import FacebookComment from "../../models/FacebookComment.js"; 
+
+// Instagram Models (Aapke project mein jo naam hon, unhe yahan verify kar lein)
+import Conversation from "../../models/Conversation.js";
+import Message from "../../models/Message.js";
+import InstagramAccount from "../../models/InstagramAccount.js";
+import Comment from "../../models/InstagramComment.js";
+import AutoReplyRule from "../../models/AutoReplyRule.js";
+
+// Common Models
 import StartupData from "../../models/StartupData.js";
-import { generateAIReply } from "../../utils/aiHelper.js"; // Aapka AI helper
+import { generateAIReply } from "../../utils/aiHelper.js";
 
 dotenv.config();
 
-// Same Verify Token logic as Instagram
 const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN; 
-// const VERIFY_TOKEN = "qwertyuiop1234567890"; 
 
-// 1. Verify Webhook (GET)
+// ==========================================
+// 1. Verify Webhook (GET) - Common for both
+// ==========================================
 export const verifyFbWebhook = (req, res) => {
-  if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
-    res.status(200).send(req.query["hub.challenge"]);
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("WEBHOOK VERIFIED SUCCESSFULLY!");
+    res.status(200).send(challenge);
   } else {
     res.sendStatus(403);
   }
 };
 
+// ==========================================
 // 2. Handle Incoming Webhook Events (POST)
+// ==========================================
 export const handleFbWebhook = async (req, res) => {
   const body = req.body;
-  console.log("FB Webhook receive message hit -- ");
+  
+  // Debugging hit
+  console.log(`[Webhook Hit] Received Object: ${body.object}`);
 
+  // ----------------------------------------------------
+  // 🟦 FACEBOOK LOGIC (body.object === "page")
+  // ----------------------------------------------------
   if (body.object === "page") {
     for (const entry of body.entry) {
-      const pageId = entry.id; // Aapke Facebook Page ki ID
+      const pageId = entry.id;
 
+      // 💬 MODULE A: FACEBOOK DIRECT MESSAGES (DMs)
       if (entry.messaging) {
         for (const webhookEvent of entry.messaging) {
-          
-          // Agar message text nahi hai ya aapne khud bheja hai (echo), toh skip karein
           if (!webhookEvent.message || !webhookEvent.message.text || webhookEvent.message.is_echo) continue;
 
-          const senderId = webhookEvent.sender.id; // Customer ki PSID (Page-Scoped ID)
+          const senderId = webhookEvent.sender.id;
           const text = webhookEvent.message.text;
 
+          console.log(`[FB DM] From: ${senderId} | Text: "${text}"`);
+
           try {
-            // ==========================================
-            // STEP 1: SAVE INCOMING MESSAGE TO DB
-            // ==========================================
             let conv = await FacebookConversation.findOne({ page_id: pageId, customer_psid: senderId });
             
             if (!conv) {
@@ -52,150 +74,233 @@ export const handleFbWebhook = async (req, res) => {
                 customer_name: "FB_User_" + senderId.substring(0, 6),
                 last_message: text, 
                 last_message_time: new Date(webhookEvent.timestamp),
-                ai_enabled: true // Default true for new chats
+                ai_enabled: true 
               });
-              await conv.save();
             } else {
               conv.last_message = text;
               conv.last_message_time = new Date(webhookEvent.timestamp);
-              await conv.save();
             }
+            await conv.save();
 
             const msg = new FacebookMessage({
-              conversation_id: conv._id, 
-              sender_id: senderId, 
-              receiver_id: pageId, 
-              text: text, 
-              is_from_me: false // Customer ka message
+              conversation_id: conv._id, sender_id: senderId, receiver_id: pageId, text: text, is_from_me: false 
             });
             await msg.save();
 
-            // ==========================================
-            // STEP 2: AI AUTO-REPLY LOGIC
-            // ==========================================
+            const io = req.app.get('socketio'); 
+            if (io) io.emit("receive_new_message", { platform: "facebook", conversationId: conv._id, message: msg });
+
+            // 🤖 AI AUTO-REPLY FOR FB DM
             const account = await FacebookAccount.findOne({ page_id: pageId });
-
-            // 🔥 MAIN UPDATE: Checking account.ai_enabled AND conv.ai_enabled
-            // conv.ai_enabled !== false ensures backward compatibility with older documents where field might be undefined
             if (account && account.ai_enabled && conv.ai_enabled !== false) {
-              console.log("AI is enabled globally AND for this specific chat. Fetching startup data...");
-              
               const startupContext = await StartupData.findOne({ userId: account.userId });
-
               if (startupContext) {
-                // 1. Generate AI Reply (Platform as 'Facebook')
                 const aiReplyText = await generateAIReply(text, startupContext, "Facebook");
-                
-                console.log(`[FB AI Reply Generated]: ${aiReplyText}`);
-
-                // 2. Send Reply via Meta Graph API
                 try {
                   await axios.post(
-                    `https://graph.facebook.com/v19.0/me/messages`,
-                    {
-                      recipient: { id: senderId },
-                      message: { text: aiReplyText }
-                    },
-                    {
-                      params: { access_token: account.access_token } // FB Page Access Token
-                    }
+                    `https://graph.facebook.com/v25.0/me/messages`,
+                    { recipient: { id: senderId }, message: { text: aiReplyText } },
+                    { params: { access_token: account.access_token } }
                   );
-
-                  // 3. Save Outgoing AI Message to DB
                   const aiMsg = new FacebookMessage({
-                    conversation_id: conv._id,
-                    sender_id: pageId,        // Sender ab aapka page hai
-                    receiver_id: senderId,
-                    text: aiReplyText,
-                    is_from_me: true         // True kyunki system ne bheja
+                    conversation_id: conv._id, sender_id: pageId, receiver_id: senderId, text: aiReplyText, is_from_me: true 
                   });
                   await aiMsg.save();
-
-                  // 4. Update Conversation with AI's Last Message
-                  conv.last_message = aiReplyText;
-                  conv.last_message_time = new Date();
-                  await conv.save();
-
-                } catch (metaError) {
-                  console.error("Meta API Failed to send FB AI reply:", metaError.response?.data || metaError.message);
-                }
-              } else {
-                console.log("Startup data missing for this user. Cannot send FB AI reply.");
+                  conv.last_message = aiReplyText; conv.last_message_time = new Date(); await conv.save();
+                  console.log(`[FB AI DM Reply Sent]: ${aiReplyText}`);
+                } catch (err) { console.error("FB AI Reply Failed:", err.message); }
               }
-            } else {
-              // Agar Global AI off hai, ya is user ka specific chat AI off (muted) hai
-              console.log(`AI skipped: Either Account AI is OFF or Chat AI is muted for Conv ID: ${conv._id}`);
             }
+          } catch (e) { console.error("Error processing FB DM event:", e); }
+        }
+      }
 
-          } catch (e) {
-             console.error("Error saving FB Webhook or executing AI:", e);
+      // 📝 MODULE B: FACEBOOK POST COMMENTS
+      if (entry.changes) {
+        for (const change of entry.changes) {
+          if (change.field === "feed" && change.value.item === "comment" && change.value.verb === "add") {
+            const commentData = change.value;
+            if (commentData.from.id === pageId) continue;
+
+            const commentId = commentData.comment_id;
+            const commentText = commentData.message;
+            const postId = commentData.post_id;
+
+            console.log(`[FB Comment] From: ${commentData.from.id} | Text: "${commentText}"`);
+
+            try {
+              const newComment = new FacebookComment({
+                fb_page_id: pageId, fb_post_id: postId, comment_id: commentId,
+                sender_name: commentData.from.name, sender_id: commentData.from.id, message: commentText, timestamp: new Date()
+              });
+              await newComment.save();
+
+              // 🤖 AI AUTO-REPLY FOR FB COMMENT
+              const account = await FacebookAccount.findOne({ page_id: pageId });
+              if (account && account.ai_enabled) {
+                const startupContext = await StartupData.findOne({ userId: account.userId });
+                if (startupContext) {
+                  let postCaption = "No caption";
+                  try {
+                    const postCtx = await axios.get(`https://graph.facebook.com/v25.0/${postId}`, { params: { fields: "message", access_token: account.access_token }});
+                    postCaption = postCtx.data.message || "No caption";
+                  } catch (e) {}
+
+                  const aiReplyText = await generateAIReply(commentText, startupContext, "Facebook Comment", postCaption);
+                  try {
+                    const replyRes = await axios.post(
+                      `https://graph.facebook.com/v25.0/${commentId}/comments`, null,
+                      { params: { message: aiReplyText, access_token: account.access_token } }
+                    );
+                    const aiSavedReply = new FacebookComment({
+                      fb_page_id: pageId, fb_post_id: postId, comment_id: replyRes.data.id, parent_id: commentId,
+                      sender_name: account.page_name || "Page Admin", message: aiReplyText, timestamp: new Date()
+                    });
+                    await aiSavedReply.save();
+                    console.log(`[FB AI Comment Reply Sent]: ${aiReplyText}`);
+                  } catch (err) { console.error("FB Comment Reply Failed:", err.message); }
+                }
+              }
+            } catch (error) { console.error("Error processing FB Comment event:", error); }
           }
         }
       }
     }
-    // Meta ko hamesha 200 return karna zaroori hai
     return res.status(200).send("EVENT_RECEIVED");
   }
-  return res.sendStatus(404);
+
+
+  // ----------------------------------------------------
+  // 🟪 INSTAGRAM LOGIC (body.object === "instagram")
+  // ----------------------------------------------------
+  else if (body.object === "instagram") {
+    for (const entry of body.entry) {
+      const myAccountId = entry.id; 
+
+      // 💬 MODULE A: INSTAGRAM DIRECT MESSAGES (DMs)
+      if (entry.messaging) {
+        for (const webhookEvent of entry.messaging) {
+          if (!webhookEvent.message || !webhookEvent.message.text || webhookEvent.message.is_echo) continue;
+
+          const customerId = webhookEvent.sender.id;
+          const messageText = webhookEvent.message.text;
+          const timestamp = webhookEvent.timestamp;
+
+          console.log(`[IG DM] From: ${customerId} | Text: "${messageText}"`);
+
+          try {
+            let conversation = await Conversation.findOne({ instagram_user_id: myAccountId, customer_ig_id: customerId });
+            if (!conversation) {
+              conversation = new Conversation({
+                instagram_user_id: myAccountId, customer_ig_id: customerId, customer_username: "IG_User_" + customerId.substring(0, 6),
+                last_message: messageText, last_message_time: new Date(timestamp), ai_enabled: true 
+              });
+            } else {
+              conversation.last_message = messageText; conversation.last_message_time = new Date(timestamp);
+            }
+            await conversation.save();
+
+            const incomingMessage = new Message({
+              conversation_id: conversation._id, sender_id: customerId, receiver_id: myAccountId, text: messageText, is_from_me: false
+            });
+            await incomingMessage.save();
+
+            const io = req.app.get('socketio'); 
+            if (io) io.emit("receive_new_message", { platform: "instagram", conversationId: conversation._id, message: incomingMessage });
+
+            // 🤖 AI AUTO-REPLY FOR IG DM
+            const account = await InstagramAccount.findOne({ instagram_user_id: myAccountId });
+            if (account && account.ai_enabled && conversation.ai_enabled !== false) {
+              const startupContext = await StartupData.findOne({ userId: account.userId });
+              if (startupContext) {
+                const aiReplyText = await generateAIReply(messageText, startupContext, "Instagram DM");
+                try {
+                  await axios.post(
+                    `https://graph.facebook.com/v25.0/me/messages`,
+                    { recipient: { id: customerId }, message: { text: aiReplyText } },
+                    { params: { access_token: account.access_token } }
+                  );
+                  const outgoingMessage = new Message({
+                    conversation_id: conversation._id, sender_id: myAccountId, receiver_id: customerId, text: aiReplyText, is_from_me: true
+                  });
+                  await outgoingMessage.save();
+                  conversation.last_message = aiReplyText; conversation.last_message_time = new Date(); await conversation.save();
+                  console.log(`[IG AI DM Reply Sent]: ${aiReplyText}`);
+                } catch (err) { console.error("IG AI Reply Failed:", err.message); }
+              }
+            }
+          } catch (error) { console.error("Error processing IG DM event:", error); }
+        }
+      }
+
+      // 📝 MODULE B: INSTAGRAM POST COMMENTS
+      if (entry.changes) {
+        for (const change of entry.changes) {
+          if (change.field === "comments") {
+            const commentData = change.value;
+            if (commentData.from.id === myAccountId) continue;
+
+            const commentId = commentData.id;
+            const commentText = commentData.text;
+            const mediaId = commentData.media.id; 
+            const customerUsername = commentData.from.username;
+
+            console.log(`[IG Comment] By @${customerUsername} on Post ${mediaId}: "${commentText}"`);
+
+            try {
+              const newComment = new Comment({
+                ig_account_id: myAccountId, ig_media_id: mediaId, comment_id: commentId,
+                username: customerUsername, text: commentText, timestamp: new Date()
+              });
+              await newComment.save();
+
+              // 🤖 AUTO-REPLY LOGIC FOR IG COMMENT
+              const account = await InstagramAccount.findOne({ instagram_user_id: myAccountId });
+              if (account) {
+                const autoRule = await AutoReplyRule.findOne({ platform: 'instagram', account_id: myAccountId, post_id: mediaId });
+                let replyTextToSend = null;
+
+                if (autoRule && autoRule.is_enabled) {
+                  replyTextToSend = autoRule.reply_text;
+                } else if (account.ai_enabled) {
+                  const startupContext = await StartupData.findOne({ userId: account.userId });
+                  if (startupContext) {
+                    let postCaption = "No caption";
+                    try {
+                      const postCtx = await axios.get(`https://graph.facebook.com/v25.0/${mediaId}`, { params: { fields: "caption", access_token: account.access_token } });
+                      postCaption = postCtx.data.caption || "No caption";
+                    } catch (e) {}
+                    replyTextToSend = await generateAIReply(commentText, startupContext, "Instagram Comment", postCaption);
+                  }
+                }
+
+                if (replyTextToSend) {
+                  try {
+                    const replyRes = await axios.post(
+                      `https://graph.facebook.com/v25.0/${commentId}/replies`, null,
+                      { params: { message: replyTextToSend, access_token: account.access_token } }
+                    );
+                    const aiSavedReply = new Comment({
+                      ig_account_id: myAccountId, ig_media_id: mediaId, comment_id: replyRes.data.id, parent_id: commentId, 
+                      username: account.ig_username, text: replyTextToSend, timestamp: new Date()
+                    });
+                    await aiSavedReply.save();
+                    console.log(`[IG Comment Reply Sent]: ${replyTextToSend}`);
+                  } catch (err) { console.error("IG Comment Reply Failed:", err.message); }
+                }
+              }
+            } catch (error) { console.error("Error processing IG Comment event:", error); }
+          }
+        }
+      }
+    }
+    return res.status(200).send("EVENT_RECEIVED");
+  }
+
+  // ----------------------------------------------------
+  // ⚠️ UNKNOWN OBJECT
+  // ----------------------------------------------------
+  else {
+    return res.sendStatus(404);
+  }
 };
-
-
-
-// import FacebookConversation from "../../models/FacebookConversation.js";
-// import FacebookMessage from "../../models/FacebookMessage.js";
-
-// // Same Verify Token logic as Instagram
-// // const VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN; 
-// const VERIFY_TOKEN = "qwertyuiop1234567890"; 
-
-
-// export const verifyFbWebhook = (req, res) => {
-//   if (req.query["hub.mode"] === "subscribe" && req.query["hub.verify_token"] === VERIFY_TOKEN) {
-//     res.status(200).send(req.query["hub.challenge"]);
-//   } else {
-//     res.sendStatus(403);
-//   }
-// };
-
-// export const handleFbWebhook = async (req, res) => {
-//   const body = req.body;
-//   console.log("fb webhook recive massage hit --  ")
-//   if (body.object === "page") {
-//     for (const entry of body.entry) {
-//       const pageId = entry.id;
-//       if (entry.messaging) {
-//         for (const webhookEvent of entry.messaging) {
-//           if (!webhookEvent.message || !webhookEvent.message.text || webhookEvent.message.is_echo) continue;
-
-//           const senderId = webhookEvent.sender.id;
-//           const text = webhookEvent.message.text;
-
-//           try {
-//             let conv = await FacebookConversation.findOne({ page_id: pageId, customer_psid: senderId });
-//             if (!conv) {
-//               conv = new FacebookConversation({
-//                 page_id: pageId, customer_psid: senderId,
-//                 customer_name: "FB_User_" + senderId.substring(0,6),
-//                 last_message: text, last_message_time: new Date(webhookEvent.timestamp)
-//               });
-//               await conv.save();
-//             } else {
-//               conv.last_message = text;
-//               conv.last_message_time = new Date(webhookEvent.timestamp);
-//               await conv.save();
-//             }
-
-//             const msg = new FacebookMessage({
-//               conversation_id: conv._id, sender_id: senderId, receiver_id: pageId, text, is_from_me: false
-//             });
-//             await msg.save();
-//           } catch (e) {
-//              console.error("Error saving FB Webhook:", e);
-//           }
-//         }
-//       }
-//     }
-//     return res.status(200).send("EVENT_RECEIVED");
-//   }
-//   return res.sendStatus(404);
-// };
