@@ -85,6 +85,13 @@ const auditLogSchema = new mongoose.Schema(
         "settings_updated",
         "notification_sent",
         "notification_failed",
+        "email_campaign_created",
+        "email_campaign_deleted",
+        "email_campaign_sent",
+        "email_template_created",
+        "email_template_updated",
+        "email_template_deleted",
+        "email_smtp_updated",
       ],
     },
     resource: {

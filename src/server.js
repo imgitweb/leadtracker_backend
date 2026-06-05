@@ -32,7 +32,9 @@ import formRoutes from "./routes/forms.js";
 import analyticsRoutes from "./routes/analytics.js";
 import knowledgeRepositoryRoutes from "./routes/knowledgeRepository.js";
 import superAdminRoutes from "./superadmin/routes/superAdminRoutes.js";
+import bulkEmailRoutes from './routes/bulkEmail.js';
 import { CompanyModuleService } from "./services/CompanyModuleService.js";
+import { BulkEmailService } from './services/BulkEmailService.js';
 import aiRoutes from "./routes/aiRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import supportTicketRoutes from "./routes/supportTickets.js";
@@ -73,10 +75,20 @@ const io = new Server(server, {
   },
 });
 
-app.set("socketio", io);
+
+app.set('socketio', io);
+
+
 
 await connectDB();
+await CompanyModuleService.syncSystemModules();
 await CompanyModuleService.syncAllCompanies();
+
+setInterval(() => {
+  BulkEmailService.dispatchDueCampaigns().catch((error) => {
+    console.error('Bulk email dispatcher error:', error.message);
+  });
+}, 60 * 1000);
 
 // ============ MIDDLEWARE ============
 
@@ -148,15 +160,16 @@ app.get("/health", (req, res) => {
 });
 
 // API routes
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/company", companyRoutes);
-app.use("/api/lead", leadRoutes);
-app.use("/api/contact", contactRoutes);
-app.use("/api/forms", formRoutes);
-app.use("/api/analytics", analyticsRoutes);
-app.use("/api/knowledge-repository", knowledgeRepositoryRoutes);
-app.use("/api/superadmin", superAdminRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/company', companyRoutes);
+app.use('/api/lead', leadRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/forms', formRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/knowledge-repository', knowledgeRepositoryRoutes);
+app.use('/api/superadmin', superAdminRoutes);
+app.use('/api/bulk-email', bulkEmailRoutes);
 
 app.use("/api/ai", aiRoutes);
 app.use("/api/chat", chatRoutes);
@@ -185,7 +198,7 @@ app.use(errorHandler);
 io.on("connection", (socket) => {
   console.log(`🟢 New Client Connected: ${socket.id}`);
 
-  socket.on("disconnect", () => {
+  socket.on('disconnect', () => {
     console.log(`🔴 Client Disconnected: ${socket.id}`);
   });
 });

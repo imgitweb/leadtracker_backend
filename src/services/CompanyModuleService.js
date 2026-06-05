@@ -3,6 +3,7 @@ import Company from '../models/Company.js';
 import CompanyModule from '../models/CompanyModule.js';
 import SystemModule from '../models/SystemModule.js';
 import AuditLog from '../models/AuditLog.js';
+import { MODULE_DEFINITIONS } from '../config/modules.js';
 
 const normalizeBoolean = (value) => {
   if (typeof value === 'boolean') return value;
@@ -29,6 +30,26 @@ const normalizePayload = (payload) => {
 };
 
 export class CompanyModuleService {
+  static async syncSystemModules() {
+    const allowedKeys = MODULE_DEFINITIONS.map((module) => module.key);
+
+    for (const moduleDefinition of MODULE_DEFINITIONS) {
+      await SystemModule.findOneAndUpdate(
+        { key: moduleDefinition.key },
+        {
+          key: moduleDefinition.key,
+          label: moduleDefinition.label,
+          description: moduleDefinition.description,
+          defaultEnabled: moduleDefinition.defaultEnabled,
+          group: moduleDefinition.group || 'General',
+        },
+        { upsert: true, new: true }
+      );
+    }
+
+    await SystemModule.deleteMany({ key: { $nin: allowedKeys } });
+  }
+
   static async getSystemModules() {
     return await SystemModule.find().sort({ createdAt: 1 }).lean();
   }
