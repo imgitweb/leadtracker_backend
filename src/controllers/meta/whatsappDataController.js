@@ -4,6 +4,7 @@ import WhatsAppAccount from "../../models/WhatsAppAccount.js";
 import WhatsAppConversation from "../../models/WhatsAppConversation.js";
 import WhatsAppMessage from "../../models/WhatsAppMessage.js";
 import WhatsAppTemplate from "../../models/WhatsAppTemplate.js"; // Naya model import karein
+import WhatsAppCampaignLog from "../../models/WhatsAppCampaignLog.js";
 
 // ==========================================
 // 1. GET CONVERSATIONS
@@ -547,23 +548,18 @@ export const refreshTemplateStatus = async (req, res) => {
 //   }
 // };
 
-
 const resolveTemplateText = (template, variables = []) => {
   try {
-    // Standardizing to lower case checking (handles 'BODY' or 'body' safely)
     const bodyComponent = template?.components?.find(c => c.type?.toLowerCase() === "body");
     if (!bodyComponent || !bodyComponent.text) return `[Template: ${template?.name || 'WhatsApp Template'}]`;
 
     let text = bodyComponent.text;
-
-    // {{1}}, {{2}} ko runtime dynamic input string values se replace karega
     variables.forEach((val, index) => {
       text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), val || "");
     });
-
     return text;
   } catch (err) {
-    console.error("Error resolving template text layout calculation:", err);
+    console.error("Error resolving template:", err);
     return "Template message processed and sent.";
   }
 };
@@ -572,51 +568,41 @@ export const sendBulkWaTemplate = async (req, res) => {
   try {
     const { phoneId } = req.params;
     const { templateName, language, recipients } = req.body;
-    const userId = req.user?._id; // Added safe optional chaining navigation
+    const userId = req.user?._id;
 
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
-      return res.status(400).json({ error: "Recipients data array is mandatory and cannot be empty." });
+      return res.status(400).json({ error: "Recipients data array is mandatory." });
     }
 
-    // Account check optimization layer
     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
-    if (!account) return res.status(404).json({ error: "WhatsApp integration account configuration not found." });
+    if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
 
-    // Fetch Template Layout structure exactly once outside execution iteration boundaries
     const template = await WhatsAppTemplate.findOne({ 
       phone_number_id: phoneId, 
       name: templateName 
     });
-    if (!template) return res.status(404).json({ error: "Template structure metadata layout records not found." });
+    if (!template) return res.status(404).json({ error: "Template not found." });
 
     const results = { total: recipients.length, success: 0, failed: 0, errors: [] };
+    const deliveryDetails = [];
 
     for (const rec of recipients) {
       try {
-        if (!rec.phone) {
-          results.failed++;
-          results.errors.push({ phone: "Unknown Target", error: "Missing mobile phone target parameter." });
-          continue;
-        }
+        if (!rec.phone) throw new Error("Missing mobile phone parameter.");
 
-        // Clean phone number: Removes spaces, dashes, +, etc. (keeps only digits)
         const cleanedPhone = String(rec.phone).replace(/[^0-9]/g, '');
 
-        // --- 1. Build Meta API payload dynamic structural elements ---
         const components = [];
         if (rec.variables && rec.variables.length > 0) {
           components.push({
             type: "body",
-            parameters: rec.variables.map(val => ({
-              type: "text",
-              text: String(val || " "), // Strictly string-casted backup for structural parameters boundary
-            })),
+            parameters: rec.variables.map(val => ({ type: "text", text: String(val || " ") })),
           });
         }
 
         const payload = {
           messaging_product: "whatsapp",
-          to: cleanedPhone, // Using sanitized numeric values
+          to: cleanedPhone,
           type: "template",
           template: {
             name: templateName,
@@ -625,8 +611,8 @@ export const sendBulkWaTemplate = async (req, res) => {
           },
         };
 
-        // --- 2. Dispatch Call To Meta Graph Cloud Gateway ---
-        await axios.post(
+        // Send via Meta
+        const metaResponse = await axios.post(
           `https://graph.facebook.com/v23.0/${phoneId}/messages`,
           payload,
           {
@@ -634,39 +620,36 @@ export const sendBulkWaTemplate = async (req, res) => {
               Authorization: `Bearer ${account.access_token}`,
               "Content-Type": "application/json",
             },
-            timeout: 12000 // Boundary ceiling timeout setup to prevent total event pool lock
+            timeout: 12000
           }
         );
 
-        // --- 3. Replace dynamic placeholders using top helper for system logs tracking ---
+        const messageId = metaResponse.data?.messages?.[0]?.id || `wamid_${Date.now()}`;
         const resolvedText = resolveTemplateText(template, rec.variables || []);
 
-        // --- 4. Atomic Upsert Matrix Synchronization for chat threads ---
+        // --- FIXED: Wapas original schema fields use kiye gaye hain ---
         const conversationUpdate = {
           $set: {
             last_message: resolvedText, 
             last_message_time: new Date(),
+            customer_name: rec.name || "WA User",
           },
           $setOnInsert: {
-            phone_number_id: phoneId,
-            customer_phone: cleanedPhone,
-            customer_name: rec.name || "WA User",
+            phone_number_id: phoneId,      // Correct Field
+            customer_phone: cleanedPhone,  // Correct Field
             ai_enabled: true,
           },
         };
 
-        if (rec.name) {
-          conversationUpdate.$set.customer_name = rec.name;
-        }
-
         const conversation = await WhatsAppConversation.findOneAndUpdate(
-          { phone_number_id: phoneId, customer_phone: cleanedPhone },
+          { phone_number_id: phoneId, customer_phone: cleanedPhone }, // Correct Field
           conversationUpdate,
-          { upsert: true, new: true }
+          { upsert: true, returnDocument: 'after' } 
         );
 
-        // --- 5. Commit Entry tracking log inside individual Message Collection schema ---
         await WhatsAppMessage.create({
+          message_id: messageId,
+          status: "sent",
           conversation_id: conversation._id,
           sender_id: phoneId,
           receiver_id: cleanedPhone,
@@ -678,26 +661,48 @@ export const sendBulkWaTemplate = async (req, res) => {
         });
 
         results.success++;
+        deliveryDetails.push({
+          phone: cleanedPhone,
+          status: "success",
+          message_id: messageId,
+          error_message: null
+        });
+
       } catch (err) {
         results.failed++;
-        const errorMsg = err.response?.data?.error?.message || err.message || "Pipeline processing exception.";
+        const errorMsg = err.response?.data?.error?.message || err.message || "Failed to process.";
         results.errors.push({ phone: rec.phone || "Unknown Target", error: errorMsg });
+        
+        deliveryDetails.push({
+          phone: rec.phone || "Unknown",
+          status: "failed",
+          message_id: null,
+          error_message: errorMsg
+        });
       }
     }
 
-    // Standard structural payload compilation return
+    await WhatsAppCampaignLog.create({
+      userId: userId,
+      phone_number_id: phoneId,
+      template_name: templateName,
+      total_recipients: results.total,
+      successful_sends: results.success,
+      failed_sends: results.failed,
+      delivery_details: deliveryDetails
+    });
+
     res.status(200).json({
       success: true,
-      message: `Bulk transmission finished processing. Success: ${results.success}, Failed: ${results.failed}`,
+      message: `Campaign Processing Complete. Success: ${results.success}, Failed: ${results.failed}`,
       results,
     });
 
   } catch (error) {
-    console.error("Critical System Bulk Template Sender Route Crash Error:", error);
-    res.status(500).json({ error: "Failed to process bulk template campaign transmission sequence." });
+    console.error("Critical Route Error:", error);
+    res.status(500).json({ error: "Failed to process campaign." });
   }
 };
-
 
 // ==========================================
 // 10. GET TEMPLATE ANALYTICS (Sent, Delivered, Read)
@@ -921,16 +926,67 @@ export const getWaProfileDetails = async (req, res) => {
     
     await account.save();
 
-    res.status(200).json({ success: true, profile: account });
+    // Mongoose document ko plain object banayein
+    const safeProfile = account.toObject();
+    
+    // Access token hata dein taki frontend par na jaye
+    delete safeProfile.access_token;
+
+    res.status(200).json({ success: true, profile: safeProfile });
   } catch (error) {
     console.error("Fetch Profile Error:", error.response?.data || error.message);
     res.status(500).json({ error: "Failed to fetch WhatsApp profile details." });
   }
 };
 
+// export const getWaProfileDetails = async (req, res) => {
+//   try {
+//     const { phoneId } = req.params;
+//     const userId = req.user._id;
+
+//     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+//     if (!account) return res.status(404).json({ error: "Account not found" });
+
+//     // Meta API se Profile aur Name dono ek sath fetch karein
+//     const [profileRes, phoneRes] = await Promise.all([
+//       axios.get(
+//         `https://graph.facebook.com/v23.0/${phoneId}/whatsapp_business_profile`,
+//         { headers: { Authorization: `Bearer ${account.access_token}` }, params: { fields: "about,address,description,email,profile_picture_url,websites,vertical" } }
+//       ).catch(() => ({ data: { data: [{}] } })), // Fallback if empty
+      
+//       axios.get(
+//         `https://graph.facebook.com/v23.0/${phoneId}`,
+//         { headers: { Authorization: `Bearer ${account.access_token}` }, params: { fields: "verified_name,name_status" } }
+//       ).catch(() => ({ data: {} })) // Fallback
+//     ]);
+
+//     const profileData = profileRes.data.data[0] || {};
+//     const phoneData = phoneRes.data || {};
+
+//     // DB Update
+//     account.about = profileData.about || account.about;
+//     account.description = profileData.description || account.description;
+//     account.email = profileData.email || account.email;
+//     account.address = profileData.address || account.address;
+//     account.profile_picture_url = profileData.profile_picture_url || account.profile_picture_url;
+//     account.websites = profileData.websites || account.websites;
+//     account.verified_name = phoneData.verified_name || account.verified_name;
+//     account.name_status = phoneData.name_status || account.name_status;
+    
+//     await account.save();
+
+//     res.status(200).json({ success: true, profile: account });
+//   } catch (error) {
+//     console.error("Fetch Profile Error:", error.response?.data || error.message);
+//     res.status(500).json({ error: "Failed to fetch WhatsApp profile details." });
+//   }
+// };
+
 // ==========================================
 // 13. UPDATE WHATSAPP PROFILE & DISPLAY NAME
 // ==========================================
+
+
 export const updateWaProfileDetails = async (req, res) => {
   try {
     const { phoneId } = req.params;
@@ -1002,6 +1058,7 @@ export const updateWaProfileDetails = async (req, res) => {
     res.status(400).json({ error: metaError || "Failed to update profile details." });
   }
 };
+
 // ==========================================
 // 14. UPDATE PROFILE PHOTO ONLY (Meta + DB Sync)
 // ==========================================
