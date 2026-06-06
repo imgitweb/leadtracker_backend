@@ -32,7 +32,7 @@ export const getInstagramPosts = async (req, res) => {
   }
 };
 
-// 👉 🚀 NEW: CREATE & PUBLISH A NEW POST
+
 export const publishInstagramPost = async (req, res) => {
   try {
     const { accountId } = req.params;
