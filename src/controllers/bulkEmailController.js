@@ -103,10 +103,59 @@ export const sendCampaign = async (req, res) => {
 
 export const dispatchDueCampaigns = async (req, res) => {
   try {
-    const campaigns = await BulkEmailService.dispatchDueCampaigns();
-    sendResponse(res, 200, true, 'Due campaigns dispatched successfully', { campaigns });
+    const results = await BulkEmailService.dispatchDueCampaigns();
+    sendResponse(res, 200, true, 'Due campaigns dispatched', { results });
   } catch (error) {
     sendError(res, 500, error.message, error);
+  }
+};
+
+export const trackOpen = async (req, res) => {
+  try {
+    await BulkEmailService.trackOpen(req.params.campaignId, req.params.trackingId);
+  } catch (error) {
+    // Ignore errors for tracking pixels
+  }
+  
+  // Return a 1x1 transparent PNG
+  const transparentPixel = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    'base64'
+  );
+  
+  res.writeHead(200, {
+    'Content-Type': 'image/png',
+    'Content-Length': transparentPixel.length,
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+  });
+  res.end(transparentPixel);
+};
+
+export const trackUnsubscribe = async (req, res) => {
+  try {
+    await BulkEmailService.trackUnsubscribe(req.params.campaignId, req.params.trackingId);
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Unsubscribed</title>
+        <style>
+          body { font-family: system-ui, -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8fafc; }
+          .card { background: white; padding: 40px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); text-align: center; max-width: 400px; }
+          h1 { color: #0f172a; margin-top: 0; }
+          p { color: #64748b; margin-bottom: 0; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Unsubscribed Successfully</h1>
+          <p>You have been removed from this mailing list and will no longer receive these emails.</p>
+        </div>
+      </body>
+      </html>
+    `);
+  } catch (error) {
+    res.status(400).send('Invalid or expired unsubscribe link.');
   }
 };
 
