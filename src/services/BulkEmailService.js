@@ -2,6 +2,7 @@ import nodemailer from 'nodemailer';
 import Company from '../models/Company.js';
 import Lead from '../models/Lead.js';
 import User from '../models/User.js';
+import crypto from 'crypto';
 import EmailSmtpConfig from '../models/EmailSmtpConfig.js';
 import EmailTemplate from '../models/EmailTemplate.js';
 import EmailCampaign from '../models/EmailCampaign.js';
@@ -191,10 +192,12 @@ export class BulkEmailService {
       acc.recipients += campaign.recipientCount || 0;
       acc.sent += campaign.sentCount || 0;
       acc.failed += campaign.failedCount || 0;
+      acc.opened += campaign.readCount || 0;
+      acc.unsubscribed += campaign.unsubscribeCount || 0;
       if (campaign.status === 'scheduled') acc.scheduled += 1;
       if (campaign.status === 'sent' || campaign.status === 'partially_sent') acc.completed += 1;
       return acc;
-    }, { campaigns: 0, recipients: 0, sent: 0, failed: 0, scheduled: 0, completed: 0 });
+    }, { campaigns: 0, recipients: 0, sent: 0, failed: 0, scheduled: 0, completed: 0, opened: 0, unsubscribed: 0 });
 
     return {
       smtpConfig,
@@ -363,6 +366,32 @@ export class BulkEmailService {
     return deleted.toObject();
   }
 
+  static async trackOpen(campaignId, trackingId) {
+    await EmailCampaign.updateOne(
+      { _id: campaignId, 'sendLog.trackingId': trackingId, 'sendLog.openedAt': null },
+      { 
+        $set: { 'sendLog.$.openedAt': new Date() },
+        $inc: { readCount: 1 }
+      }
+    );
+  }
+
+  static async trackUnsubscribe(campaignId, trackingId) {
+    // If they unsubscribed, they must have opened the email
+    await this.trackOpen(campaignId, trackingId);
+
+    const result = await EmailCampaign.updateOne(
+      { _id: campaignId, 'sendLog.trackingId': trackingId, 'sendLog.unsubscribedAt': null },
+      { 
+        $set: { 'sendLog.$.unsubscribedAt': new Date() },
+        $inc: { unsubscribeCount: 1 }
+      }
+    );
+    if (result.matchedCount === 0) {
+      throw new Error('Already unsubscribed or invalid link');
+    }
+  }
+
   static async sendCampaign(companyId, campaignId, userId = null) {
     const campaign = await EmailCampaign.findOne({ _id: campaignId, companyId });
     if (!campaign) {
@@ -377,51 +406,75 @@ export class BulkEmailService {
     const company = await Company.findById(companyId).select('name').lean();
     const companyName = company?.name || smtpConfig.fromName || 'Your Company';
     const transport = buildTransport(smtpConfig);
-    const sendLog = [];
-    let sentCount = 0;
-    let failedCount = 0;
+    
+    let sendLog = campaign.sendLog || [];
+    const alreadySentEmails = new Set(sendLog.map(l => l.email));
+    const recipientsToProcess = campaign.recipients.filter(r => !alreadySentEmails.has(r.email));
 
     campaign.status = 'sending';
     campaign.errorMessage = '';
     await campaign.save();
 
-    for (const recipient of campaign.recipients) {
-      try {
-        const subject = renderTemplate(campaign.subjectSnapshot, recipient, companyName);
-        const html = renderTemplate(campaign.htmlSnapshot, recipient, companyName);
-        const text = renderTemplate(campaign.textSnapshot || '', recipient, companyName);
+    let sentCount = campaign.sentCount || 0;
+    let failedCount = campaign.failedCount || 0;
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:5001';
 
-        const result = await transport.sendMail({
-          from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
-          to: recipient.email,
-          subject,
-          html,
-          text: text || undefined,
-          replyTo: smtpConfig.replyTo || undefined,
-        });
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < recipientsToProcess.length; i += BATCH_SIZE) {
+      const batch = recipientsToProcess.slice(i, i + BATCH_SIZE);
+      const batchPromises = batch.map(async (recipient) => {
+        const trackingId = crypto.randomUUID();
+        try {
+          const subject = renderTemplate(campaign.subjectSnapshot, recipient, companyName);
+          let html = renderTemplate(campaign.htmlSnapshot, recipient, companyName);
+          const text = renderTemplate(campaign.textSnapshot || '', recipient, companyName);
 
-        sentCount += 1;
-        sendLog.push({
-          email: recipient.email,
-          status: 'sent',
-          messageId: result.messageId || '',
-          sentAt: new Date(),
-        });
-      } catch (error) {
-        failedCount += 1;
-        sendLog.push({
-          email: recipient.email,
-          status: 'failed',
-          error: error.message,
-          sentAt: new Date(),
-        });
-      }
-    }
+          const openTrackUrl = `${backendUrl}/api/bulk-email/track/open/${campaign._id}/${trackingId}.png`;
+          const unsubTrackUrl = `${backendUrl}/api/bulk-email/track/unsubscribe/${campaign._id}/${trackingId}`;
 
-    campaign.sentCount = sentCount;
-    campaign.failedCount = failedCount;
-    campaign.sendLog = sendLog;
-    campaign.lastDispatchedAt = new Date();
+          html += `
+            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; text-align: center;">
+              If you no longer wish to receive these emails, you can <a href="${unsubTrackUrl}" style="color: #0066cc; text-decoration: underline;">unsubscribe here</a>.
+            </div>
+          `;
+          html += `<img src="${openTrackUrl}" width="1" height="1" style="display:none; visibility:hidden; opacity:0;" alt="" />`;
+
+          const result = await transport.sendMail({
+            from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
+            to: recipient.email,
+            subject,
+            html,
+            text: text || undefined,
+            replyTo: smtpConfig.replyTo || undefined,
+            headers: {
+              'List-Unsubscribe': `<${unsubTrackUrl}>`,
+              'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+            }
+          });
+
+          return { success: true, email: recipient.email, messageId: result.messageId || '', trackingId };
+        } catch (error) {
+          return { success: false, email: recipient.email, error: error.message, trackingId };
+        }
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      
+      batchResults.forEach(res => {
+        if (res.success) {
+          sentCount += 1;
+          sendLog.push({ email: res.email, status: 'sent', messageId: res.messageId, trackingId: res.trackingId, sentAt: new Date() });
+        } else {
+          failedCount += 1;
+          sendLog.push({ email: res.email, status: 'failed', error: res.error, trackingId: res.trackingId, sentAt: new Date() });
+        }
+      });
+
+      campaign.sentCount = sentCount;
+      campaign.failedCount = failedCount;
+      campaign.sendLog = sendLog;
+      await campaign.save();
+    }campaign.lastDispatchedAt = new Date();
     campaign.status = failedCount === 0 ? 'sent' : (sentCount > 0 ? 'partially_sent' : 'failed');
     if (failedCount > 0 && sentCount === 0) {
       campaign.errorMessage = 'All recipients failed to receive the campaign';

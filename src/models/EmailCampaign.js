@@ -18,6 +18,9 @@ const sendLogSchema = new mongoose.Schema(
     email: { type: String, trim: true, required: true },
     status: { type: String, trim: true, required: true },
     messageId: { type: String, trim: true, default: '' },
+    trackingId: { type: String, trim: true, default: '' },
+    openedAt: { type: Date, default: null },
+    unsubscribedAt: { type: Date, default: null },
     error: { type: String, trim: true, default: '' },
     sentAt: { type: Date, default: Date.now },
   },
@@ -52,6 +55,8 @@ const emailCampaignSchema = new mongoose.Schema(
     recipientCount: { type: Number, default: 0 },
     sentCount: { type: Number, default: 0 },
     failedCount: { type: Number, default: 0 },
+    readCount: { type: Number, default: 0 },
+    unsubscribeCount: { type: Number, default: 0 },
     status: {
       type: String,
       enum: ['draft', 'scheduled', 'sending', 'sent', 'partially_sent', 'failed'],
