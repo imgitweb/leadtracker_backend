@@ -34,8 +34,9 @@ import knowledgeRepositoryRoutes from "./routes/knowledgeRepository.js";
 import superAdminRoutes from "./superadmin/routes/superAdminRoutes.js";
 import { CompanyModuleService } from "./services/CompanyModuleService.js";
 import aiRoutes from "./routes/aiRoutes.js";
-import chatRoutes from "./routes/chatRoutes.js";
-import supportTicketRoutes from "./routes/supportTickets.js";
+import chatRoutes from './routes/chatRoutes.js';
+import supportTicketRoutes from './routes/supportTickets.js';
+import { startCronJobs } from './jobs/cronJobs.js';
 
 import instagramAuth from "./routes/meta/instagramAuth.js";
 import instagramDataRoutes from "./routes/meta/instagramDataRoutes.js";
