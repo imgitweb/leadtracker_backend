@@ -15,7 +15,9 @@ import {
   getWaProfileDetails,
   updateWaProfileDetails,
   updateWaProfilePhoto,
-  updateWaConversationName
+  updateWaConversationName,
+  updateTemplatePurpose,
+  deleteWhatsAppTemplate
 } from "../../controllers/meta/whatsappDataController.js";
 import { protect } from "../../middleware/auth.js";
 
@@ -32,7 +34,8 @@ router.post("/:phoneId/conversations/:convId/toggle-ai", protect, toggleWaConver
 router.put("/:phoneId/conversations/:convId/name", protect, updateWaConversationName);
 
 // Template Management Routes
-router.post("/templates/create", protect, createWhatsAppTemplate);
+// router.post("/templates/create", protect, createWhatsAppTemplate);
+router.post('/templates/create', protect, upload.single('media'), createWhatsAppTemplate);
 router.get("/:phoneId/templates", protect, getWaTemplates);
 router.post("/:phoneId/templates/sync", protect, syncWaTemplates);
 router.get("/:phoneId/templates/:templateId/refresh", protect, refreshTemplateStatus);
@@ -47,5 +50,8 @@ router.get("/:phoneId/profile", protect, getWaProfileDetails);
 router.post("/:phoneId/profile/update", protect, updateWaProfileDetails);
 // 🟢 Ab upload variable yahan properly kaam karega
 router.post("/:phoneId/profile/photo", protect, upload.single("file"), updateWaProfilePhoto);
+
+router.put('/templates/:templateId/purpose', protect, updateTemplatePurpose);
+router.delete('/:phoneId/templates/:id', protect, deleteWhatsAppTemplate);
 
 export default router;
