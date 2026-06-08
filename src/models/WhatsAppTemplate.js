@@ -30,12 +30,17 @@ const whatsappTemplateSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // NAYI FIELD: Sirf internal use ke liye
+  purpose: {
+    type: String,
+    default: "",
+  },
   components: {
-    type: Array, // Store the exact components payload here
+    type: Array, 
     default: [],
   },
   status: {
-    type: String, // e.g., PENDING, APPROVED, REJECTED
+    type: String, 
     default: "PENDING",
   }
 }, { timestamps: true });
