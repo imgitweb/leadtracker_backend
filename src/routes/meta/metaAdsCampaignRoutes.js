@@ -9,25 +9,46 @@ import {
   getAllCampaigns,
 } from "../../controllers/meta/metaAdsCampaignController.js";
 import { protect } from "../../middleware/auth.js";
-import { getAdSetAds, getCampaignAdSets } from "../../controllers/meta/metaAdsetsComtroller.js";
+import { 
+  getAdSetAds, 
+  getCampaignAdSets,
+  createAdSet,
+  createAd,
+  updateAdSetStatus,
+  deleteAdSet,
+  updateAdStatus,
+  deleteAd,
+  getAdInsights
+} from "../../controllers/meta/metaAdsetsComtroller.js";
 
 const router = express.Router();
-// -------------campaign routes------------------
+
+// ==========================================
+// CAMPAIGN ROUTES
+// ==========================================
 router.get("/", protect, getAllCampaigns);
-// Fetch Pages for Dropdown
 router.get("/pages", protect, getLinkedPages);
-// Create Campaign
 router.post("/create", protect, createFullCampaign);
 router.get("/posts/:pageId", protect, getPagePosts);
-router.post("/status", protect, updateCampaignStatus); // For PAUSE, ACTIVE, ARCHIVED
-router.post("/modify", protect, modifyCampaign); // For changing budget/objective
-router.delete("/:campaignId", protect, deleteCampaign); // For Permane
+router.post("/status", protect, updateCampaignStatus); // PAUSE, ACTIVE, ARCHIVED
+router.post("/modify", protect, modifyCampaign); // Changing budget/objective
+router.delete("/:campaignId", protect, deleteCampaign); // Delete Campaign
 
-// --------ad-sets routes ------------------------
+// ==========================================
+// AD-SETS ROUTES
+// ==========================================
 router.get("/ad-sets", protect, getCampaignAdSets);
+router.post("/ad-sets/create", protect, createAdSet);
+router.post("/ad-sets/status", protect, updateAdSetStatus); // PAUSE, ACTIVE, ARCHIVED
+router.delete("/ad-sets/:adSetId", protect, deleteAdSet); // Delete Ad Set
 
-// --------ads routes ------------------------
+// ==========================================
+// ADS ROUTES
+// ==========================================
 router.get("/get-ads", protect, getAdSetAds);
-
+router.post("/ads/create", protect, createAd);
+router.post("/ads/status", protect, updateAdStatus); // PAUSE, ACTIVE, ARCHIVED
+router.delete("/ads/:adId", protect, deleteAd); // Delete Ad
+router.get('/ads/insights', protect, getAdInsights);
 
 export default router;
