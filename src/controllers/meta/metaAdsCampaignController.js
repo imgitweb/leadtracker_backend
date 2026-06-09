@@ -161,18 +161,24 @@ export const getPagePosts = async (req, res) => {
     const account = await FacebookAccount.findOne({ page_id: pageId, userId });
     if (!account) return res.status(404).json({ error: "Account not found" });
 
-    // Fetch posts using Page Access Token
+    // Fetch posts using Page Access Token, including 'is_eligible_for_promotion'
     const response = await axios.get(
       `https://graph.facebook.com/v25.0/${pageId}/posts`,
       {
         params: {
-          fields: "id,message,full_picture,permalink_url,created_time",
+          // ADDED: is_eligible_for_promotion
+          fields: "id,message,full_picture,permalink_url,created_time,is_eligible_for_promotion",
           access_token: account.access_token,
         },
       },
     );
 
-    res.status(200).json({ posts: response.data.data || [] });
+    const allPosts = response.data.data || [];
+
+    // FIX: Filter ONLY posts that Facebook allows to be boosted
+    const promotablePosts = allPosts.filter(post => post.is_eligible_for_promotion === true);
+
+    res.status(200).json({ posts: promotablePosts });
   } catch (error) {
     console.error("Fetch Posts Error:", error.response?.data || error.message);
     res.status(500).json({ error: "Failed to fetch page posts" });
