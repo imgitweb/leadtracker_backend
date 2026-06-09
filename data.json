@@ -1,0 +1,20 @@
+{
+    "data": [
+        {
+            "ad_id": "6891918930603",
+            "ad_name": "[12/11/2025] Promoting https://api.whatsapp.com/send?phone=19082104916",
+            "impressions": "21528",
+            "clicks": "86",
+            "spend": "799.9",
+            "ctr": "0.39948",
+            "date_start": "2025-12-11",
+            "date_stop": "2025-12-16"
+        }
+    ],
+    "paging": {
+        "cursors": {
+            "before": "MAZDZD",
+            "after": "MAZDZD"
+        }
+    }
+}
