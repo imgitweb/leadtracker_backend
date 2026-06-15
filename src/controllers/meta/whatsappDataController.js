@@ -1648,3 +1648,74 @@ export const deleteWhatsAppTemplate = async (req, res) => {
     res.status(500).json({ error: "Internal server error while deleting template." });
   }
 };
+
+
+
+
+
+
+
+
+
+
+
+
+export const subscribeWabaApp = async (req, res) => {
+  try {
+    // Route parameter ka naam kuch bhi ho (accountId ya phoneId), value yahan aayegi
+    const { accountId } = req.params; 
+
+    // 🟢 FIX: findById() ki jagah findOne() use karein aur phone_number_id se match karein
+    const account = await WhatsAppAccount.findOne({ phone_number_id: accountId });
+    
+    if (!account) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "WhatsApp Account database mein nahi mila." 
+      });
+    }
+
+    // WABA ID aur Token aapke schema se extract karein
+    const WABA_ID = account.waba_id;
+    const TOKEN = account.access_token;
+
+    if (!WABA_ID || !TOKEN) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Account mein WABA ID ya Access Token missing hai." 
+      });
+    }
+
+    // Meta Graph API URL 
+    const apiVersion = process.env.META_API_VERSION || "v23.0";
+    const url = `https://graph.facebook.com/${apiVersion}/${WABA_ID}/subscribed_apps`;
+
+    // Meta API ko POST request bhejein
+    const metaResponse = await axios.post(
+      url,
+      {}, 
+      {
+        headers: {
+          Authorization: `Bearer ${TOKEN}`,
+        },
+      }
+    );
+
+    // Success Response frontend ko bhejein
+    return res.status(200).json({
+      success: true,
+      message: "App successfully WABA par subscribe ho gayi hai! Webhooks ab aana shuru ho jayenge.",
+      metaData: metaResponse.data,
+    });
+
+  } catch (error) {
+    const errorMessage = error.response?.data || error.message;
+    console.error("❌ App Subscription Error:", JSON.stringify(errorMessage, null, 2));
+
+    return res.status(500).json({
+      success: false,
+      message: "Meta Graph API par app subscribe karne mein error aayi.",
+      error: errorMessage,
+    });
+  }
+};
