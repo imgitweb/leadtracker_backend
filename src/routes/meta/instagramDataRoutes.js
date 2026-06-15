@@ -1,10 +1,11 @@
 import express from "express";
 import { 
   getInstagramPosts,
-  publishInstagramPost,         // 👈 Naya Import
-  getPostComments,              // 👈 Naya Import
-  replyToComment,               // 👈 Naya Import
-  deleteComment,                // 👈 Naya Import
+  publishInstagramPost,         // 👈 New route to publish
+  deleteInstagramPost,          // 👈 🚀 New route to DELETE POST
+  getPostComments,              
+  replyToComment,               
+  deleteComment,                
   getConversations, 
   getMessages, 
   sendMessage,
@@ -18,7 +19,8 @@ const router = express.Router();
 
 // 📸 Posts Management
 router.get("/:accountId/posts", protect, getInstagramPosts);
-router.post("/:accountId/posts", protect, publishInstagramPost); // 👈 New route to publish
+router.post("/:accountId/posts", protect, publishInstagramPost); 
+router.delete("/:accountId/posts/:postId", protect, deleteInstagramPost); // 🚀 Deleted API route
 
 // 💬 Comments Management
 router.get("/:accountId/posts/:postId/comments", protect, getPostComments);
@@ -31,7 +33,7 @@ router.get("/:accountId/conversations/:conversationId/messages", protect, getMes
 router.post("/:accountId/messages", protect, sendMessage);
 router.post("/:accountId/conversations/:conversationId/toggle-ai", protect, toggleIgConversationAI);
 
-// Auto-Reply Rules
+// 🤖 Auto-Reply Rules
 router.get("/:accountId/posts/:postId/auto-reply", protect, getAutoReplyRule);
 router.post("/:accountId/posts/:postId/auto-reply", protect, saveAutoReplyRule);
 

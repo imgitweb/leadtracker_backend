@@ -42,6 +42,8 @@ export const publishInstagramPost = async (req, res) => {
       return res.status(400).json({ error: "Image URL is required to create a post." });
     }
 
+    // 🔴 NEW FIX: Basic URL Validation Check
+    // Meta requires direct image links. Check if it's not a generic HTML page.
     if (imageUrl.includes('drive.google.com') || imageUrl.includes('dropbox.com/s/')) {
       return res.status(400).json({ 
         error: "Invalid Image Source", 
@@ -52,6 +54,7 @@ export const publishInstagramPost = async (req, res) => {
     const account = await InstagramAccount.findOne({ instagram_user_id: accountId });
     if (!account) return res.status(404).json({ error: "Account not found" });
 
+    // STEP 1: Create Media Container
     console.log(`Step 1: Creating Meta Media Container with URL: ${imageUrl}`);
     const containerRes = await axios.post(
       `https://graph.facebook.com/v25.0/${accountId}/media`,
@@ -69,6 +72,7 @@ export const publishInstagramPost = async (req, res) => {
     const creationId = containerRes.data.id;
     console.log(`Step 1 Success: Container ID ${creationId} created.`);
 
+    // STEP 2: Publish the Container
     console.log("Step 2: Publishing the Container to Instagram Feed...");
     const publishRes = await axios.post(
       `https://graph.facebook.com/v25.0/${accountId}/media_publish`,
@@ -91,40 +95,27 @@ export const publishInstagramPost = async (req, res) => {
     });
 
   } catch (error) {
+    // 🔴 NEW FIX: Better Error Handling for Meta API Rejections
     console.error("Error publishing post:", error.response?.data || error.message);
     
     let errorMessage = "Failed to publish post";
     let details = error.response?.data?.error?.message || "Unknown Meta API error";
 
+    // Agar Meta exact wahi 36001 image format error de raha hai
     if (error.response?.data?.error?.code === 36001) {
        errorMessage = "Invalid Image Format or Inaccessible URL";
-       details = "Meta could not download the image. Please make sure the URL ends in .jpg or .png and is publicly accessible.";
+       details = "Meta could not download the image. Please make sure the URL ends in .jpg or .png and is 100% publicly accessible on the internet.";
     }
 
-    res.status(400).json({ error: errorMessage, details: details });
-  }
-};
-
-// 🚀 NEW: Delete Instagram Post Logic
-export const deleteInstagramPost = async (req, res) => {
-  try {
-    const { accountId, postId } = req.params;
-    const account = await InstagramAccount.findOne({ instagram_user_id: accountId });
-    if (!account) return res.status(403).json({ error: "Not allowed." });
-
-    await axios.delete(`https://graph.facebook.com/v25.0/${postId}`, { 
-      params: { access_token: account.access_token } 
+    res.status(400).json({ 
+      error: errorMessage, 
+      details: details
     });
-
-    res.status(200).json({ success: true, message: "Post deleted" });
-  } catch (error) {
-    console.error("Delete Post Error:", error.response?.data || error.message);
-    res.status(500).json({ error: "Failed to delete post" });
   }
 };
 
 // ==========================================
-// 💬 COMMENTS MANAGEMENT (WITH SYNC)
+// 💬 COMMENTS MANAGEMENT
 // ==========================================
 export const getPostComments = async (req, res) => {
   try {
@@ -132,7 +123,6 @@ export const getPostComments = async (req, res) => {
     const account = await InstagramAccount.findOne({ instagram_user_id: accountId });
     if (!account) return res.status(404).json({ error: "Account not found" });
 
-    // 1. Fetch live comments from Meta
     const response = await axios.get(`https://graph.facebook.com/v25.0/${postId}/comments`, {
       params: {
         fields: "id,text,timestamp,username,replies{id,text,timestamp,username}",
@@ -140,54 +130,41 @@ export const getPostComments = async (req, res) => {
       }
     });
 
-    const metaComments = response.data.data || [];
-    const activeMetaCommentIds = [];
+    const metaComments = response.data.data;
+    const savedComments = [];
 
-    // 2. Save and Update comments
     for (const comment of metaComments) {
-      activeMetaCommentIds.push(comment.id);
-
-      await Comment.findOneAndUpdate(
+      const savedComment = await Comment.findOneAndUpdate(
         { comment_id: comment.id },
         {
           ig_account_id: accountId,
           ig_media_id: postId,
-          username: comment.username || "Unknown",
-          text: comment.text || "",
-          timestamp: new Date(comment.timestamp),
-          is_hidden: false // Meta pe available hai
+          username: comment.username,
+          text: comment.text,
+          timestamp: new Date(comment.timestamp)
         },
-        { returnDocument: 'after', upsert: true }
+        { new: true, upsert: true }
       );
+      savedComments.push(savedComment);
 
       if (comment.replies && comment.replies.data) {
         for (const reply of comment.replies.data) {
-          activeMetaCommentIds.push(reply.id);
-
           await Comment.findOneAndUpdate(
             { comment_id: reply.id },
             {
               ig_account_id: accountId,
               ig_media_id: postId,
               parent_id: comment.id,
-              username: reply.username || "Unknown",
-              text: reply.text || "",
-              timestamp: new Date(reply.timestamp),
-              is_hidden: false // Meta pe available hai
+              username: reply.username,
+              text: reply.text,
+              timestamp: new Date(reply.timestamp)
             },
-            { returnDocument: 'after', upsert: true }
+            { upsert: true }
           );
         }
       }
     }
 
-    // 3. Mark comments as hidden if they were deleted on Meta
-    await Comment.updateMany(
-      { ig_media_id: postId, comment_id: { $nin: activeMetaCommentIds } },
-      { $set: { is_hidden: true } }
-    );
-
-    // 4. Send updated data back
     const dbComments = await Comment.find({ ig_media_id: postId }).sort({ timestamp: -1 });
     res.status(200).json({ success: true, comments: dbComments });
 
@@ -216,10 +193,9 @@ export const replyToComment = async (req, res) => {
       ig_media_id: postId,
       comment_id: response.data.id,
       parent_id: commentId,
-      username: account.ig_username || "You", 
+      username: account.ig_username, 
       text: text,
-      timestamp: new Date(),
-      is_hidden: false
+      timestamp: new Date()
     });
     await newReply.save();
 
@@ -235,16 +211,10 @@ export const deleteComment = async (req, res) => {
     const { accountId, commentId } = req.params;
     const account = await InstagramAccount.findOne({ instagram_user_id: accountId });
     
-    // Attempt to delete from Meta
-    try {
-      await axios.delete(`https://graph.facebook.com/v25.0/${commentId}`, {
-        params: { access_token: account.access_token }
-      });
-    } catch (metaErr) {
-      console.log("Comment may already be deleted from Meta. Proceeding to hard delete from DB.");
-    }
+    await axios.delete(`https://graph.facebook.com/v25.0/${commentId}`, {
+      params: { access_token: account.access_token }
+    });
 
-    // Hard delete from Database
     await Comment.findOneAndDelete({ comment_id: commentId });
     res.status(200).json({ success: true, message: "Comment deleted successfully" });
   } catch (error) {
@@ -328,7 +298,7 @@ export const toggleIgConversationAI = async (req, res) => {
     }
 
     const updatedConversation = await Conversation.findByIdAndUpdate(
-      conversationId, { ai_enabled: isEnabled }, { returnDocument: 'after' } 
+      conversationId, { ai_enabled: isEnabled }, { new: true } 
     );
 
     if (!updatedConversation) return res.status(404).json({ error: "Conversation not found" });
@@ -345,9 +315,8 @@ export const toggleIgConversationAI = async (req, res) => {
 };
 
 
-// ==========================================
-// 🤖 AUTO-REPLY MANAGEMENT
-// ==========================================
+
+// 👉 Get Auto-Reply Rule for a Post
 export const getAutoReplyRule = async (req, res) => {
   try {
     const { accountId, postId } = req.params;
@@ -358,6 +327,7 @@ export const getAutoReplyRule = async (req, res) => {
   }
 };
 
+// 👉 Save/Update Auto-Reply Rule for a Post
 export const saveAutoReplyRule = async (req, res) => {
   try {
     const { accountId, postId } = req.params;
@@ -366,7 +336,7 @@ export const saveAutoReplyRule = async (req, res) => {
     const rule = await AutoReplyRule.findOneAndUpdate(
       { platform: 'instagram', account_id: accountId, post_id: postId },
       { is_enabled: isEnabled, reply_text: replyText },
-      { returnDocument: 'after', upsert: true }
+      { new: true, upsert: true }
     );
 
     res.status(200).json({ success: true, rule });

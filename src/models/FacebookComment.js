@@ -11,7 +11,7 @@ const facebookCommentSchema = new mongoose.Schema(
     sender_name: { type: String, required: true }, 
     sender_id: { type: String }, // User ki FB profile ID
     
-    text: { type: String, required: true },
+    text: { type: String },
     timestamp: { type: Date, required: true },
     is_hidden: { type: Boolean, default: false }
   },
