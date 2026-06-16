@@ -30,6 +30,130 @@ export const getLinkedPages = async (req, res) => {
 // ==========================================
 // CREATE FULL CAMPAIGN (Existing Function)
 // ==========================================
+// export const createFullCampaign = async (req, res) => {
+//   try {
+//     const userId = req.user._id;
+//     const {
+//       adAccountId,
+//       campaignName,
+//       dailyBudget,
+//       pageId,
+//       websiteUrl,
+//       adText,
+//       imageUrl,
+//       targetLocation,
+//       minAge,
+//       is_adset_budget_sharing_enabled = false,
+//       bidStrategy = "LOWEST_COST_WITHOUT_CAP",
+//       targetGender,
+//       advantage_audience,
+//       maxAge,
+//     } = req.body;
+
+//     console.log("$$$", req.body);
+
+//     // 1. Get Token from DB
+//     const accountRecord = await MetaAdAccount.findOne({ userId, adAccountId });
+//     if (!accountRecord || !accountRecord.userAccessToken) {
+//       return res.status(404).json({
+//         error: "Access Token not found. Please sync your account again.",
+//       });
+//     }
+//     const token = accountRecord.userAccessToken;
+
+//     // 2. CREATE CAMPAIGN
+//     const campaignRes = await axios.post(
+//       `${META_API}/${adAccountId}/campaigns`,
+//       {
+//         name: campaignName,
+//         objective: "OUTCOME_TRAFFIC",
+//         status: "PAUSED",
+//         special_ad_categories: [],
+//         access_token: token,
+//         is_adset_budget_sharing_enabled,
+//         bid_strategy: bidStrategy,
+//       },
+//     );
+//     const campaignId = campaignRes.data.id;
+
+//     // 3. CREATE AD SET (Targeting updated with Frontend data)
+//     const adSetRes = await axios.post(`${META_API}/${adAccountId}/adsets`, {
+//       name: `${campaignName} - AdSet`,
+//       campaign_id: campaignId,
+//       daily_budget: dailyBudget * 100,
+//       billing_event: "IMPRESSIONS",
+//       optimization_goal: "LINK_CLICKS",
+//       targeting: {
+//         geo_locations: { countries: [targetLocation || "IN"] },
+//         age_min: minAge || 18,
+//         age_max: maxAge || 65,
+//         gender: targetGender,
+//         interests: advantage_audience,
+//       },
+//       status: "PAUSED",
+//       access_token: token,
+//     });
+//     const adSetId = adSetRes.data.id;
+
+//     // 4. CREATE AD CREATIVE
+//     const creativeRes = await axios.post(
+//       `${META_API}/${adAccountId}/adcreatives`,
+//       {
+//         name: `${campaignName} - Creative`,
+//         object_story_spec: {
+//           page_id: pageId,
+//           link_data: {
+//             link: websiteUrl,
+//             message: adText,
+//             picture: imageUrl,
+//             call_to_action: { type: "LEARN_MORE" },
+//           },
+//         },
+//         access_token: token,
+//       },
+//     );
+//     const creativeId = creativeRes.data.id;
+
+//     // 5. CREATE ACTUAL AD
+//     const adRes = await axios.post(`${META_API}/${adAccountId}/ads`, {
+//       name: `${campaignName} - Final Ad`,
+//       adset_id: adSetId,
+//       creative: { creative_id: creativeId },
+//       status: "PAUSED",
+//       access_token: token,
+//     });
+
+//     // 6. SAVE TO DATABASE
+//     const newCampaign = new MetaAdCampaign({
+//       userId,
+//       adAccountId,
+//       campaignId,
+//       adSetId,
+//       creativeId,
+//       adId: adRes.data.id,
+//       campaignName,
+//       budget: dailyBudget,
+//       websiteUrl,
+//     });
+//     await newCampaign.save();
+
+//     return res.status(201).json({
+//       success: true,
+//       message: "Campaign Created Successfully!",
+//       data: newCampaign,
+//     });
+//   } catch (error) {
+//     console.error(
+//       "Meta API Creation Error:",
+//       error.response?.data || error.message,
+//     );
+//     const metaMsg =
+//       error.response?.data?.error?.message || "Unknown Meta Error";
+//     return res.status(500).json({ error: `Meta API Error: ${metaMsg}` });
+//   }
+// };
+
+
 export const createFullCampaign = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -45,12 +169,13 @@ export const createFullCampaign = async (req, res) => {
       minAge,
       is_adset_budget_sharing_enabled = false,
       bidStrategy = "LOWEST_COST_WITHOUT_CAP",
+      bidAmount, // 🔥 NEW: Extracted bidAmount from frontend payload
       targetGender,
       advantage_audience,
       maxAge,
     } = req.body;
 
-    console.log("$$$", req.body);
+    console.log("$$$ Payload received from frontend:", req.body);
 
     // 1. Get Token from DB
     const accountRecord = await MetaAdAccount.findOne({ userId, adAccountId });
@@ -76,23 +201,57 @@ export const createFullCampaign = async (req, res) => {
     );
     const campaignId = campaignRes.data.id;
 
-    // 3. CREATE AD SET (Targeting updated with Frontend data)
-    const adSetRes = await axios.post(`${META_API}/${adAccountId}/adsets`, {
+    // 3. CREATE AD SET (Targeting & Bid Strategy handled carefully)
+    
+    // Step A: Map frontend string genders to Meta API integers
+    let genderTargeting = [];
+    if (targetGender === "male") genderTargeting = [1];
+    else if (targetGender === "female") genderTargeting = [2];
+
+    // Step B: Build the targeting payload dynamically
+// Step B: Build the targeting payload dynamically
+    const targetingPayload = {
+      geo_locations: { countries: [targetLocation || "IN"] },
+      age_min: minAge || 18,
+      age_max: maxAge || 65,
+      // 🔥 NEW FIX: Meta ab isko strictly mangta hai
+      targeting_automation: {
+        advantage_audience: advantage_audience ? 1 : 0
+      }
+    };
+
+    // Agar 'all' hai, toh genders field bhejo hi mat, Meta khud samajh jayega
+    if (genderTargeting.length > 0) {
+      targetingPayload.genders = genderTargeting; 
+    }
+
+    // Step C: Build Ad Set Payload
+    const adSetPayload = {
       name: `${campaignName} - AdSet`,
       campaign_id: campaignId,
-      daily_budget: dailyBudget * 100,
+      daily_budget: dailyBudget * 100, // INR to Paise
       billing_event: "IMPRESSIONS",
       optimization_goal: "LINK_CLICKS",
-      targeting: {
-        geo_locations: { countries: [targetLocation || "IN"] },
-        age_min: minAge || 18,
-        age_max: maxAge || 65,
-        gender: targetGender,
-        interests: advantage_audience,
-      },
+      targeting: targetingPayload,
       status: "PAUSED",
       access_token: token,
-    });
+    };
+
+    // 🔥 NEW: Dynamically add bid_amount if strategy requires a Cap
+    const cappedStrategies = ["LOWEST_COST_WITH_BID_CAP", "COST_CAP", "BID_CAP"];
+    if (cappedStrategies.includes(bidStrategy)) {
+      if (!bidAmount) {
+        // Backend validation: Stop API call if frontend missed sending bidAmount
+        return res.status(400).json({ 
+          error: `Meta API Error: 'bidAmount' is required when using ${bidStrategy} strategy.` 
+        });
+      }
+      // Add bid_amount (INR to Paise conversion)
+      adSetPayload.bid_amount = bidAmount * 100;
+    }
+
+    // Hit Meta API for Ad Set
+    const adSetRes = await axios.post(`${META_API}/${adAccountId}/adsets`, adSetPayload);
     const adSetId = adSetRes.data.id;
 
     // 4. CREATE AD CREATIVE
@@ -147,11 +306,11 @@ export const createFullCampaign = async (req, res) => {
       "Meta API Creation Error:",
       error.response?.data || error.message,
     );
-    const metaMsg =
-      error.response?.data?.error?.message || "Unknown Meta Error";
+    const metaMsg = error.response?.data?.error?.message || error.response?.data?.error?.error_user_msg || "Unknown Meta Error";
     return res.status(500).json({ error: `Meta API Error: ${metaMsg}` });
   }
 };
+
 
 export const getPagePosts = async (req, res) => {
   try {
