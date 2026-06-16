@@ -32,9 +32,9 @@ import formRoutes from "./routes/forms.js";
 import analyticsRoutes from "./routes/analytics.js";
 import knowledgeRepositoryRoutes from "./routes/knowledgeRepository.js";
 import superAdminRoutes from "./superadmin/routes/superAdminRoutes.js";
-import bulkEmailRoutes from './routes/bulkEmail.js';
+import bulkEmailRoutes from "./routes/bulkEmail.js";
 import { CompanyModuleService } from "./services/CompanyModuleService.js";
-import { BulkEmailService } from './services/BulkEmailService.js';
+import { BulkEmailService } from "./services/BulkEmailService.js";
 import aiRoutes from "./routes/aiRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import supportTicketRoutes from "./routes/supportTickets.js";
@@ -82,7 +82,11 @@ await connectDB();
 await CompanyModuleService.syncSystemModules();
 await CompanyModuleService.syncAllCompanies();
 
-// Initialize scheduled background tasks
+setInterval(() => {
+  BulkEmailService.dispatchDueCampaigns().catch((error) => {
+    console.error("Bulk email dispatcher error:", error.message);
+  });
+}, 60 * 1000);
 startCronJobs();
 
 // ============ MIDDLEWARE ============
@@ -164,6 +168,7 @@ app.use("/api/forms", formRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/knowledge-repository", knowledgeRepositoryRoutes);
 app.use("/api/superadmin", superAdminRoutes);
+app.use("/api/bulk-email", bulkEmailRoutes);
 
 app.use("/api/ai", aiRoutes);
 app.use("/api/chat", chatRoutes);
@@ -204,7 +209,7 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`
   ╔════════════════════════════════════════╗
-  ║   🚀 Cinfy Lead Tracker API Running   ║
+  ║    🚀 Cinfy Lead Tracker API Running  ║
   ║       Port: ${PORT}                    ║
   ║   Environment: ${process.env.NODE_ENV || "development"}             ║
   ╚════════════════════════════════════════╝
