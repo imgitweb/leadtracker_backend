@@ -21,6 +21,7 @@ import connectDB from "./config/database.js";
 import { auditLog } from "./middleware/auditLog.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { apiLimiter } from "./config/rateLimiter.js";
+import bulkMailRoutes from "./routes/bulkEmail.js";
 
 // Import routes
 import authRoutes from "./routes/auth.js";
@@ -181,6 +182,7 @@ app.use("/api/webhook/whatsapp", whatsappWebhookRoutes);
 
 app.use("/api/meta-ads", metaAdsAuthRoutes);
 app.use("/api/meta-campaigns", metaCampaignsRoutes);
+app.use("/api/bulk-email", bulkMailRoutes);
 
 // Error handling
 app.use(notFound);
