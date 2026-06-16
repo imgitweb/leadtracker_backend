@@ -167,7 +167,8 @@ export const getPagePosts = async (req, res) => {
       {
         params: {
           // ADDED: is_eligible_for_promotion
-          fields: "id,message,full_picture,permalink_url,created_time,is_eligible_for_promotion",
+          fields:
+            "id,message,full_picture,permalink_url,created_time,is_eligible_for_promotion",
           access_token: account.access_token,
         },
       },
@@ -176,7 +177,9 @@ export const getPagePosts = async (req, res) => {
     const allPosts = response.data.data || [];
 
     // FIX: Filter ONLY posts that Facebook allows to be boosted
-    const promotablePosts = allPosts.filter(post => post.is_eligible_for_promotion === true);
+    const promotablePosts = allPosts.filter(
+      (post) => post.is_eligible_for_promotion === true,
+    );
 
     res.status(200).json({ posts: promotablePosts });
   } catch (error) {
@@ -335,6 +338,7 @@ export const getAllCampaigns = async (req, res) => {
       .select(
         "campaignId campaignName status objective buying_type created_time",
       )
+      .sort({ createdAt: -1 })
       .lean();
 
     if (existingCampaigns.length > 0) {
@@ -404,6 +408,7 @@ export const getAllCampaigns = async (req, res) => {
       .select(
         "campaignId campaignName status objective buying_type created_time",
       )
+      .sort({ createdAt: -1 })
       .lean();
 
     return res.status(200).json({
@@ -417,6 +422,87 @@ export const getAllCampaigns = async (req, res) => {
       success: false,
       message: "Failed to fetch campaigns",
       error: error.response?.data?.error?.message || error.message,
+    });
+  }
+};
+
+export const syncWithMeta = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { adAccountId } = req.query;
+
+    const metaAdAccount = await MetaAdAccount.findOne({
+      userId,
+      adAccountId,
+    }).select("adAccountId userAccessToken");
+
+    if (!metaAdAccount) {
+      return res.status(404).json({
+        success: false,
+        message: "No linked Meta Ad Account found for this user.",
+      });
+    }
+
+    const { data } = await axios.get(
+      `${META_API}/${metaAdAccount.adAccountId}/campaigns`,
+      {
+        params: {
+          fields: "id,name,status,objective,buying_type,created_time",
+          access_token: metaAdAccount.userAccessToken,
+        },
+      },
+    );
+
+    const campaigns = data?.data || [];
+
+    if (campaigns.length > 0) {
+      await MetaAdCampaign.bulkWrite(
+        campaigns.map((camp) => ({
+          updateOne: {
+            filter: {
+              userId,
+              adAccountId: metaAdAccount.adAccountId,
+              campaignId: camp.id,
+            },
+            update: {
+              $set: {
+                userId,
+                adAccountId: metaAdAccount.adAccountId,
+                campaignId: camp.id,
+                campaignName: camp.name,
+                status: camp.status,
+                objective: camp.objective,
+                buying_type: camp.buying_type,
+                created_time: camp.created_time,
+              },
+            },
+            upsert: true,
+          },
+        })),
+      );
+    }
+
+    const savedCampaigns = await MetaAdCampaign.find({
+      userId,
+      adAccountId,
+    })
+      .select(
+        "campaignId campaignName status objective buying_type created_time",
+      )
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      message: "Campaigns fetched successfully",
+      campaigns: savedCampaigns,
+      count: savedCampaigns.length,
+    });
+  } catch (error) {
+    console.log("Something went wrong!", error);
+    return res.status(500).json({
+      message: "Something went wrong while syncing with meta",
+      success: false,
     });
   }
 };

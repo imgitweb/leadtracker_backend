@@ -7,10 +7,11 @@ import {
   deleteCampaign,
   getPagePosts,
   getAllCampaigns,
+  syncWithMeta,
 } from "../../controllers/meta/metaAdsCampaignController.js";
 import { protect } from "../../middleware/auth.js";
-import { 
-  getAdSetAds, 
+import {
+  getAdSetAds,
   getCampaignAdSets,
   createAdSet,
   createAd,
@@ -18,7 +19,7 @@ import {
   deleteAdSet,
   updateAdStatus,
   deleteAd,
-  getAdInsights
+  getAdInsights,
 } from "../../controllers/meta/metaAdsetsComtroller.js";
 
 const router = express.Router();
@@ -27,6 +28,7 @@ const router = express.Router();
 // CAMPAIGN ROUTES
 // ==========================================
 router.get("/", protect, getAllCampaigns);
+router.get("/sync", protect, syncWithMeta);
 router.get("/pages", protect, getLinkedPages);
 router.post("/create", protect, createFullCampaign);
 router.get("/posts/:pageId", protect, getPagePosts);
@@ -49,6 +51,6 @@ router.get("/get-ads", protect, getAdSetAds);
 router.post("/ads/create", protect, createAd);
 router.post("/ads/status", protect, updateAdStatus); // PAUSE, ACTIVE, ARCHIVED
 router.delete("/ads/:adId", protect, deleteAd); // Delete Ad
-router.get('/ads/insights', protect, getAdInsights);
+router.get("/ads/insights", protect, getAdInsights);
 
 export default router;
