@@ -38,6 +38,7 @@ import { BulkEmailService } from "./services/BulkEmailService.js";
 import aiRoutes from "./routes/aiRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import supportTicketRoutes from "./routes/supportTickets.js";
+import { startCronJobs } from './jobs/cronJobs.js';
 
 import instagramAuth from "./routes/meta/instagramAuth.js";
 import instagramDataRoutes from "./routes/meta/instagramDataRoutes.js";
@@ -86,6 +87,7 @@ setInterval(() => {
     console.error("Bulk email dispatcher error:", error.message);
   });
 }, 60 * 1000);
+startCronJobs();
 
 // ============ MIDDLEWARE ============
 

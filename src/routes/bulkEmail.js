@@ -14,9 +14,15 @@ import {
   sendCampaign,
   updateTemplate,
   deleteCampaign,
+  trackOpen,
+  trackUnsubscribe,
 } from '../controllers/bulkEmailController.js';
 
 const router = express.Router();
+
+// Public tracking routes (unauthenticated)
+router.get('/track/open/:campaignId/:trackingId.png', trackOpen);
+router.get('/track/unsubscribe/:campaignId/:trackingId', trackUnsubscribe);
 
 router.use(protect);
 router.use(requireModuleAccess('bulk_email'));
