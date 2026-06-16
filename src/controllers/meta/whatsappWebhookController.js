@@ -79,7 +79,7 @@ export const handleWaWebhook = async (req, res) => {
                 const io = req.app.get('socketio'); // Main server se socket nikaala
                   io.emit("receive_new_message", {
                     platform: "whatsapp", // FB ke webhook mein isko "facebook" kar dein
-                    conversationId: conversation._id,
+                    conversationId: conv._id,
                     message: text // Jo abhi DB mein save hua hai
                   });
 
