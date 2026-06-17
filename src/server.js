@@ -10,6 +10,7 @@ import path from "path";
 import { Server } from "socket.io";
 import http from "http";
 import { fileURLToPath } from "url";
+import WebSocket, { WebSocketServer } from "ws";
 
 // Load environment variables
 dotenv.config();
@@ -55,6 +56,13 @@ import metaCampaignsRoutes from "./routes/meta/metaAdsCampaignRoutes.js";
 
 import webhookRoutes from "./routes/meta/webhookRoutes.js";
 
+
+import agentRoutes from "./routes/agentRoutes.js";
+import campaignRoutes from "./routes/campaignRoutes.js";
+import "./services/campaignWorker.js";
+
+import { handleTwilioStream } from "./controllers/streamController.js";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -75,10 +83,7 @@ const io = new Server(server, {
   },
 });
 
-
 app.set('socketio', io);
-
-
 
 await connectDB();
 await CompanyModuleService.syncSystemModules();
@@ -92,7 +97,6 @@ setInterval(() => {
 
 // ============ MIDDLEWARE ============
 
-// Security middleware
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
@@ -112,19 +116,12 @@ app.use(
   }),
 );
 
-// Request logging
 app.use(morgan("combined"));
-
-// Body parser
-// Static files for uploads
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
-
-// Cookie parser
 app.use(cookieParser(process.env.SESSION_SECRET));
 
-// Session middleware
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
@@ -132,21 +129,17 @@ app.use(
     saveUninitialized: false,
     store: mongoStore.create({
       mongoUrl: process.env.MONGO_URI,
-      touchAfter: 24 * 3600, // lazy session update
+      touchAfter: 24 * 3600,
     }),
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
       sameSite: "strict",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      maxAge: 24 * 60 * 60 * 1000,
     },
   }),
 );
 
-// Rate limiting
-// app.use('/api/', apiLimiter);
-
-// Audit logging
 app.use(auditLog);
 
 // ============ ROUTES ============
@@ -159,7 +152,6 @@ app.get("/health", (req, res) => {
   });
 });
 
-// API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/company', companyRoutes);
@@ -190,17 +182,36 @@ app.use("/api/webhook/whatsapp", whatsappWebhookRoutes);
 app.use("/api/meta-ads", metaAdsAuthRoutes);
 app.use("/api/meta-campaigns", metaCampaignsRoutes);
 
-// Error handling
+// ── AI Calling Agent Routes ───────────────────────────────────────
+app.use("/api/agent", agentRoutes);
+app.use("/api/campaigns", campaignRoutes);
+// ─────────────────────────────────────────────────────────────────
+
 app.use(notFound);
 app.use(errorHandler);
 
 // ============ SOCKET.IO CONNECTION ============
 io.on("connection", (socket) => {
   console.log(`🟢 New Client Connected: ${socket.id}`);
-
   socket.on('disconnect', () => {
     console.log(`🔴 Client Disconnected: ${socket.id}`);
   });
+});
+
+// ============ WEBSOCKET — TWILIO MEDIA STREAM ============
+const wss = new WebSocketServer({ server, path: "/media-stream" });
+
+wss.on("connection", (ws, req) => {
+  console.log("✅ Twilio WebSocket connected at:", req.url);
+  handleTwilioStream(ws);
+});
+
+wss.on("error", (error) => {
+  console.error("❌ WebSocket Server Error:", error.message);
+});
+
+server.on("upgrade", (req) => {
+  console.log("🔁 Upgrade request received:", req.url);
 });
 
 // ============ START SERVER ============
