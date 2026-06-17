@@ -7,7 +7,7 @@ const whatsappCampaignLogSchema = new mongoose.Schema({
   total_recipients: { type: Number, default: 0 },
   successful_sends: { type: Number, default: 0 },
   failed_sends: { type: Number, default: 0 },
-  // Har user ka detailed report track karne ke liye array
+  status: { type: String, enum: ["sent", "delivered", "read", "failed", "success"] },
   delivery_details: [{
     phone: String,
     status: { type: String, enum: ["success", "failed"] },
