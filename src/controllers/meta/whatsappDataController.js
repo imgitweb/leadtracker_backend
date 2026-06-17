@@ -45,7 +45,7 @@ export const sendWaMessage = async (req, res) => {
     if (!account) return res.status(404).json({ error: "Account not found" });
     
     // WhatsApp Cloud API Messaging Endpoint
-    await axios.post(
+    const response = await axios.post(
       `https://graph.facebook.com/v23.0/${phoneId}/messages`,
       {
         messaging_product: "whatsapp",
@@ -56,8 +56,17 @@ export const sendWaMessage = async (req, res) => {
       { headers: { Authorization: `Bearer ${account.access_token}`, "Content-Type": "application/json" } }
     );
 
+    // 🔥 FIX: Response se message_id nikalna aur save karna
+    const messageId = response.data?.messages?.[0]?.id;
+
     const newMessage = new WhatsAppMessage({
-      conversation_id: conversationId, sender_id: phoneId, receiver_id: customer_phone, text, is_from_me: true
+      conversation_id: conversationId, 
+      message_id: messageId,        // <-- Added this
+      sender_id: phoneId, 
+      receiver_id: customer_phone, 
+      text, 
+      is_from_me: true,
+      status: "sent"                // <-- Added this
     });
     await newMessage.save();
 
@@ -309,110 +318,7 @@ export const createWhatsAppTemplate = async (req, res) => {
   }
 };
 
-// export const createWhatsAppTemplate = async (req, res) => {
-//   try {
-//     // req.body se 'purpose' bhi extract kiya gaya hai
-//     const { phoneId, name, category, language, headerText, bodyText, footerText, buttons, purpose } = req.body;
-//     const userId = req.user._id;
 
-//     // Database se waba_id nikalna
-//     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
-
-//     if (!account || !account.waba_id) {
-//       return res.status(404).json({ error: "WhatsApp account or WABA ID not found." });
-//     }
-
-//     const { waba_id, access_token } = account;
-
-//     // Components array dynamically build karein
-//     const components = [];
-
-//     // Header
-//     if (headerText && headerText.trim() !== '') {
-//       components.push({ type: 'HEADER', format: 'TEXT', text: headerText });
-//     }
-
-//     // Body
-//     const bodyComponent = { type: 'BODY', text: bodyText };
-//     const varMatches = bodyText.match(/\{\{\d+\}\}/g);
-//     let hasVariables = false;
-    
-//     if (varMatches && varMatches.length > 0) {
-//       hasVariables = true;
-//       const exampleValues = varMatches.map((v, index) => `Value ${index + 1}`);
-//       bodyComponent.example = { body_text: [exampleValues] };
-//     }
-//     components.push(bodyComponent);
-
-//     // Footer
-//     if (footerText && footerText.trim() !== '') {
-//       components.push({ type: 'FOOTER', text: footerText });
-//     }
-
-//     // Buttons
-//     if (buttons && buttons.length > 0) {
-//       const formattedButtons = buttons.map(btn => {
-//         if (btn.type === 'QUICK_REPLY') return { type: 'QUICK_REPLY', text: btn.text };
-//         if (btn.type === 'URL') return { type: 'URL', text: btn.text, url: btn.url };
-//         if (btn.type === 'PHONE_NUMBER') return { type: 'PHONE_NUMBER', text: btn.text, phone_number: btn.phone_number };
-//         return null;
-//       }).filter(Boolean);
-
-//       if (formattedButtons.length > 0) {
-//         components.push({ type: 'BUTTONS', buttons: formattedButtons });
-//       }
-//     }
-
-//     // Ye data Meta ko jayega (isme purpose nahi hai)
-//     const templatePayload = {
-//       name: name,
-//       language: language,
-//       category: category,
-//       components: components
-//     };
-
-//     if (hasVariables) {
-//       templatePayload.parameter_format = "POSITIONAL";
-//     }
-
-//     // Send to Meta Graph API
-//     const response = await axios.post(
-//       `https://graph.facebook.com/v25.0/${waba_id}/message_templates`,
-//       templatePayload,
-//       { headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" } }
-//     );
-
-//     // ✅ SAVE TO DATABASE AFTER SUCCESS (Yahan purpose save hoga)
-//     const newTemplate = new WhatsAppTemplate({
-//       userId,
-//       phone_number_id: phoneId,
-//       waba_id,
-//       meta_template_id: response.data.id,
-//       name: name,
-//       language: language,
-//       category: category,
-//       components: components,
-//       status: response.data.status || "PENDING",
-//       purpose: purpose || "" // <-- Purpose mapped here
-//     });
-
-//     await newTemplate.save();
-
-//     res.status(200).json({ 
-//       success: true, 
-//       message: "Template submitted and saved to database successfully!",
-//       template: newTemplate
-//     });
-
-//   } catch (error) {
-//     console.error("Meta API Template Error:", error.response?.data || error.message);
-//     const errorMsg = error.response?.data?.error?.error_user_msg 
-//                   || error.response?.data?.error?.message 
-//                   || "Failed to create template on Meta.";
-
-//     res.status(500).json({ error: errorMsg });
-//   }
-// };
 
 // export const createWhatsAppTemplate = async (req, res) => {
 //   try {
@@ -654,210 +560,6 @@ export const refreshTemplateStatus = async (req, res) => {
 // 9. POST SENT BULK TEMPLATE 
 // ==========================================
 
-// export const sendBulkWaTemplate = async (req, res) => {
-//   try {
-//     const { phoneId } = req.params;
-//     const { templateName, language, recipients } = req.body;
-//     const userId = req.user._id;
-
-//     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
-//     if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
-
-//     const results = {
-//       total: recipients.length,
-//       success: 0,
-//       failed: 0,
-//       errors: []
-//     };
-
-//     // Note: For massive lists (10k+), this should be handled via a background queue (like BullMQ). 
-//     // For standard bulk sends (up to a few hundred), a Promise.all or sequential loop works fine.
-    
-//     for (const rec of recipients) {
-//       try {
-//         // Build the dynamic components payload for Meta API
-//         const components = [];
-        
-//         // If template has body variables (e.g. {{1}}, {{2}}), attach them
-//         if (rec.variables && rec.variables.length > 0) {
-//           components.push({
-//             type: "body",
-//             parameters: rec.variables.map(val => ({
-//               type: "text",
-//               text: val || " " // fallback to space if empty
-//             }))
-//           });
-//         }
-
-//         const payload = {
-//           messaging_product: "whatsapp",
-//           to: rec.phone,
-//           type: "template",
-//           template: {
-//             name: templateName,
-//             language: { code: language },
-//             components: components.length > 0 ? components : undefined
-//           }
-//         };
-
-//         // Send to Meta
-//         await axios.post(
-//           `https://graph.facebook.com/v23.0/${phoneId}/messages`,
-//           payload,
-//           { headers: { Authorization: `Bearer ${account.access_token}`, "Content-Type": "application/json" } }
-//         );
-
-//         results.success++;
-//       } catch (err) {
-//         results.failed++;
-//         const errorMsg = err.response?.data?.error?.message || "Unknown error";
-//         results.errors.push({ phone: rec.phone, error: errorMsg });
-//       }
-//     }
-
-//     res.status(200).json({ 
-//       success: true, 
-//       message: `Bulk message completed. Success: ${results.success}, Failed: ${results.failed}`,
-//       results 
-//     });
-
-//   } catch (error) {
-//     console.error("Bulk Send Error:", error);
-//     res.status(500).json({ error: "Failed to process bulk template sending." });
-//   }
-// };
-
-// Helper function — {{1}}, {{2}} ko actual values se replace karo
-// const resolveTemplateText = (template, variables = []) => {
-//   const bodyComponent = template.components.find(c => c.type === "BODY");
-//   if (!bodyComponent) return `[Template: ${template.name}]`;
-
-//   let text = bodyComponent.text;
-
-//   // {{1}}, {{2}} replace karo actual variable values se
-//   variables.forEach((val, index) => {
-//     text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), val || "");
-//   });
-
-//   return text;
-// };
-
-
-
-// export const sendBulkWaTemplate = async (req, res) => {
-//   try {
-//     const { phoneId } = req.params;
-//     const { templateName, language, recipients } = req.body;
-//     const userId = req.user._id;
-
-//     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
-//     if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
-
-//     // Template ek baar fetch karo — sabke liye same template use hogi
-//     const template = await WhatsAppTemplate.findOne({ 
-//       phone_number_id: phoneId, 
-//       name: templateName 
-//     });
-//     if (!template) return res.status(404).json({ error: "Template not found." });
-
-//     const results = { total: recipients.length, success: 0, failed: 0, errors: [] };
-
-//     for (const rec of recipients) {
-//       try {
-//         // --- 1. Build Meta API payload ---
-//         const components = [];
-//         if (rec.variables && rec.variables.length > 0) {
-//           components.push({
-//             type: "body",
-//             parameters: rec.variables.map(val => ({
-//               type: "text",
-//               text: val || " ",
-//             })),
-//           });
-//         }
-
-//         const payload = {
-//           messaging_product: "whatsapp",
-//           to: rec.phone,
-//           type: "template",
-//           template: {
-//             name: templateName,
-//             language: { code: language },
-//             components: components.length > 0 ? components : undefined,
-//           },
-//         };
-
-//         // --- 2. Send to Meta ---
-//         await axios.post(
-//           `https://graph.facebook.com/v23.0/${phoneId}/messages`,
-//           payload,
-//           {
-//             headers: {
-//               Authorization: `Bearer ${account.access_token}`,
-//               "Content-Type": "application/json",
-//             },
-//           }
-//         );
-
-//         // --- 3. Variables replace karke actual text banao ---
-//         // "Hello {{1}}, your order {{2}}" → "Hello Rahul, your order #123"
-//         const resolvedText = resolveTemplateText(template, rec.variables || []);
-
-//         // --- 4. Conversation find karo ya naya banao ---
-//         const conversationUpdate = {
-//           $set: {
-//             last_message: resolvedText, // actual text store hoga
-//             last_message_time: new Date(),
-//           },
-//           $setOnInsert: {
-//             phone_number_id: phoneId,
-//             customer_phone: rec.phone,
-//             customer_name: rec.name || "WA User",
-//             ai_enabled: true,
-//           },
-//         };
-
-//         if (rec.name) {
-//           conversationUpdate.$set.customer_name = rec.name;
-//         }
-
-//         const conversation = await WhatsAppConversation.findOneAndUpdate(
-//           { phone_number_id: phoneId, customer_phone: rec.phone },
-//           conversationUpdate,
-//           { upsert: true, new: true }
-//         );
-
-//         // --- 5. Message save karo actual text ke saath ---
-//         await WhatsAppMessage.create({
-//           conversation_id: conversation._id,
-//           sender_id: phoneId,
-//           receiver_id: rec.phone,
-//           text: resolvedText,         // "Hello Rahul, your order #123 is confirmed!"
-//           is_from_me: true,
-//           is_read: true,
-//           message_type: "template",
-//           template_name: templateName,
-//         });
-
-//         results.success++;
-//       } catch (err) {
-//         results.failed++;
-//         const errorMsg = err.response?.data?.error?.message || err.message || "Unknown error";
-//         results.errors.push({ phone: rec.phone, error: errorMsg });
-//       }
-//     }
-
-//     res.status(200).json({
-//       success: true,
-//       message: `Bulk send done. Success: ${results.success}, Failed: ${results.failed}`,
-//       results,
-//     });
-
-//   } catch (error) {
-//     console.error("Bulk Send Error:", error);
-//     res.status(500).json({ error: "Failed to process bulk template sending." });
-//   }
-// };
 
 const resolveTemplateText = (template, variables = []) => {
   try {
@@ -975,7 +677,7 @@ export const sendBulkWaTemplate = async (req, res) => {
           { upsert: true, returnDocument: 'after' } 
         );
 
-        // NAYA CODE: Yahan template_id aur meta_template_id dono save karwa diye hain
+        // 🔥 Webhook Tracking: is_read: true hata diya, aur status "sent" rakha
         await WhatsAppMessage.create({
           message_id: messageId,
           status: "sent",
@@ -984,17 +686,16 @@ export const sendBulkWaTemplate = async (req, res) => {
           receiver_id: cleanedPhone,
           text: resolvedText,
           is_from_me: true,
-          is_read: true,
           message_type: "template",
           template_name: templateName,
-          template_id: template._id,                   // <-- ADDED THIS
-          meta_template_id: template.meta_template_id  // <-- ADDED THIS
+          template_id: template._id,                   // <-- ADDED
+          meta_template_id: template.meta_template_id  // <-- ADDED
         });
 
         results.success++;
         deliveryDetails.push({
           phone: cleanedPhone,
-          status: "success",
+          status: "sent", // 🔥 "success" ki jagah "sent" kiya taaki Webhook update kar sake
           message_id: messageId,
           error_message: null
         });
@@ -1006,20 +707,20 @@ export const sendBulkWaTemplate = async (req, res) => {
         
         deliveryDetails.push({
           phone: rec.phone,
-          status: "failed",
+          status: "failed", // Failed toh pehle se hi theek hai
           message_id: null,
           error_message: errorMsg
         });
       }
     }
 
-    // NAYA CODE: Campaign Log mein bhi template_id add kar diya gaya hai
+    // Campaign Log mein save karna
     await WhatsAppCampaignLog.create({
       userId: userId,
       phone_number_id: phoneId,
       template_name: templateName,
-      template_id: template._id,                   // <-- ADDED THIS
-      meta_template_id: template.meta_template_id, // <-- ADDED THIS
+      template_id: template._id,                   // <-- ADDED
+      meta_template_id: template.meta_template_id, // <-- ADDED
       total_recipients: results.total,
       successful_sends: results.success,
       failed_sends: results.failed,
@@ -1335,52 +1036,6 @@ export const getWaProfileDetails = async (req, res) => {
   }
 };
 
-// export const getWaProfileDetails = async (req, res) => {
-//   try {
-//     const { phoneId } = req.params;
-//     const userId = req.user._id;
-
-//     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
-//     if (!account) return res.status(404).json({ error: "Account not found" });
-
-//     // Meta API se Profile aur Name dono ek sath fetch karein
-//     const [profileRes, phoneRes] = await Promise.all([
-//       axios.get(
-//         `https://graph.facebook.com/v23.0/${phoneId}/whatsapp_business_profile`,
-//         { headers: { Authorization: `Bearer ${account.access_token}` }, params: { fields: "about,address,description,email,profile_picture_url,websites,vertical" } }
-//       ).catch(() => ({ data: { data: [{}] } })), // Fallback if empty
-      
-//       axios.get(
-//         `https://graph.facebook.com/v23.0/${phoneId}`,
-//         { headers: { Authorization: `Bearer ${account.access_token}` }, params: { fields: "verified_name,name_status" } }
-//       ).catch(() => ({ data: {} })) // Fallback
-//     ]);
-
-//     const profileData = profileRes.data.data[0] || {};
-//     const phoneData = phoneRes.data || {};
-
-//     // DB Update
-//     account.about = profileData.about || account.about;
-//     account.description = profileData.description || account.description;
-//     account.email = profileData.email || account.email;
-//     account.address = profileData.address || account.address;
-//     account.profile_picture_url = profileData.profile_picture_url || account.profile_picture_url;
-//     account.websites = profileData.websites || account.websites;
-//     account.verified_name = phoneData.verified_name || account.verified_name;
-//     account.name_status = phoneData.name_status || account.name_status;
-    
-//     await account.save();
-
-//     res.status(200).json({ success: true, profile: account });
-//   } catch (error) {
-//     console.error("Fetch Profile Error:", error.response?.data || error.message);
-//     res.status(500).json({ error: "Failed to fetch WhatsApp profile details." });
-//   }
-// };
-
-// ==========================================
-// 13. UPDATE WHATSAPP PROFILE & DISPLAY NAME
-// ==========================================
 
 
 export const updateWaProfileDetails = async (req, res) => {
