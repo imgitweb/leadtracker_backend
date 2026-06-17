@@ -21,6 +21,7 @@ import connectDB from "./config/database.js";
 import { auditLog } from "./middleware/auditLog.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { apiLimiter } from "./config/rateLimiter.js";
+import bulkMailRoutes from "./routes/bulkEmail.js";
 
 // Import routes
 import authRoutes from "./routes/auth.js";
@@ -32,12 +33,12 @@ import formRoutes from "./routes/forms.js";
 import analyticsRoutes from "./routes/analytics.js";
 import knowledgeRepositoryRoutes from "./routes/knowledgeRepository.js";
 import superAdminRoutes from "./superadmin/routes/superAdminRoutes.js";
-import bulkEmailRoutes from './routes/bulkEmail.js';
 import { CompanyModuleService } from "./services/CompanyModuleService.js";
 import { BulkEmailService } from './services/BulkEmailService.js';
 import aiRoutes from "./routes/aiRoutes.js";
 import chatRoutes from "./routes/chatRoutes.js";
 import supportTicketRoutes from "./routes/supportTickets.js";
+
 import { startCronJobs } from './jobs/cronJobs.js';
 
 import instagramAuth from "./routes/meta/instagramAuth.js";
@@ -183,6 +184,7 @@ app.use("/api/webhook/whatsapp", whatsappWebhookRoutes);
 
 app.use("/api/meta-ads", metaAdsAuthRoutes);
 app.use("/api/meta-campaigns", metaCampaignsRoutes);
+app.use("/api/bulk-email", bulkMailRoutes);
 
 // Error handling
 app.use(notFound);
