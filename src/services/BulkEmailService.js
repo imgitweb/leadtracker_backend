@@ -101,13 +101,23 @@ const resolveTemplateSelection = async (companyId, payload = {}) => {
     return {
       templateId: template._id,
       name: template.name,
-      subject: template.subject,
-      htmlBody: template.htmlBody,
-      textBody: template.textBody || '',
+      subject: payload.subject || template.subject,
+      htmlBody: payload.htmlBody || template.htmlBody,
+      textBody: payload.textBody || template.textBody || '',
     };
   }
 
-  throw new Error('Select a template to continue');
+  if (payload.subject && payload.htmlBody) {
+    return {
+      templateId: null,
+      name: 'Custom Email',
+      subject: payload.subject,
+      htmlBody: payload.htmlBody,
+      textBody: payload.textBody || '',
+    };
+  }
+
+  throw new Error('Select a template or provide subject and HTML body to continue');
 };
 
 const createCampaignDraft = async (companyId, creatorId, payload = {}) => {
@@ -432,18 +442,39 @@ export class BulkEmailService {
           const openTrackUrl = `${backendUrl}/api/bulk-email/track/open/${campaign._id}/${trackingId}.png`;
           const unsubTrackUrl = `${backendUrl}/api/bulk-email/track/unsubscribe/${campaign._id}/${trackingId}`;
 
-          html += `
-            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; text-align: center;">
-              If you no longer wish to receive these emails, you can <a href="${unsubTrackUrl}" style="color: #0066cc; text-decoration: underline;">unsubscribe here</a>.
-            </div>
-          `;
-          html += `<img src="${openTrackUrl}" width="1" height="1" style="display:none; visibility:hidden; opacity:0;" alt="" />`;
+          const wrappedHtml = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; background-color: #f6f9fc; font-family: system-ui, -apple-system, sans-serif;">
+  <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #f6f9fc; padding: 40px 0;">
+    <tr>
+      <td align="center" valign="top">
+        <table width="100%" border="0" cellpadding="0" cellspacing="0" style="max-width: 600px; width: 100%; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+          <tr>
+            <td align="left" valign="top" style="font-family: system-ui, -apple-system, sans-serif; font-size: 16px; line-height: 1.6; color: #333333; padding: 30px;">
+              ${html}
+              <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; text-align: center;">
+                If you no longer wish to receive these emails, you can <a href="${unsubTrackUrl}" style="color: #0066cc; text-decoration: underline;">unsubscribe here</a>.
+              </div>
+              <img src="${openTrackUrl}" width="1" height="1" style="display:none; visibility:hidden; opacity:0;" alt="" />
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 
           const result = await transport.sendMail({
             from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
             to: recipient.email,
             subject,
-            html,
+            html: wrappedHtml,
             text: text || undefined,
             replyTo: smtpConfig.replyTo || undefined,
             headers: {
