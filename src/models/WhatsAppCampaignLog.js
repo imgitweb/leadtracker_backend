@@ -26,4 +26,5 @@ const whatsappCampaignLogSchema = new mongoose.Schema({
   }]
 }, { timestamps: true });
 
+
 export default mongoose.model("WhatsAppCampaignLog", whatsappCampaignLogSchema);

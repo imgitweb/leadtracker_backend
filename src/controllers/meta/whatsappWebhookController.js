@@ -33,7 +33,7 @@ export const handleWaWebhook = async (req, res) => {
           const phoneId = value.metadata.phone_number_id; 
 
           // ===================================================================
-          // 🔥 NAYA LOGIC: MESSAGE STATUS TRACKING (Sent, Delivered, Read, Failed)
+          // 🔥 MESSAGE STATUS TRACKING (Sent, Delivered, Read, Failed)
           // ===================================================================
           if (value.statuses && value.statuses.length > 0) {
             for (const statusObj of value.statuses) {
@@ -56,7 +56,6 @@ export const handleWaWebhook = async (req, res) => {
                 );
 
                 // 2. Update in WhatsAppCampaignLog (For Campaign Reports)
-                // Hum check kar rahe hain kis campaign me ye messageId hai aur use update kar rahe hain
                 let updateCampaignQuery = { $set: { "delivery_details.$.status": status } };
                 if (errorMsg) {
                    updateCampaignQuery.$set["delivery_details.$.error_message"] = errorMsg;
@@ -86,7 +85,7 @@ export const handleWaWebhook = async (req, res) => {
           }
 
           // ===================================================================
-          // INCOMING MESSAGES LOGIC (Jo user text bhejta hai)
+          // 🔥 INCOMING MESSAGES LOGIC (Jo user text bhejta hai)
           // ===================================================================
           if (value.messages && value.messages.length > 0) {
             for (const msg of value.messages) {
@@ -94,12 +93,17 @@ export const handleWaWebhook = async (req, res) => {
 
               const customerPhone = msg.from; 
               const text = msg.text.body;
-              const customerName = value.contacts?.[0]?.profile?.name || customerPhone;
+              
+              // Meta se aane wala asli naam
+              const incomingPushName = value.contacts?.[0]?.profile?.name; 
+              const customerName = incomingPushName || customerPhone;
               const metaMessageId = msg.id; 
 
               try {
                 let conv = await WhatsAppConversation.findOne({ phone_number_id: phoneId, customer_phone: customerPhone });
+                
                 if (!conv) {
+                  // Naya Chat ban raha hai
                   conv = new WhatsAppConversation({
                     phone_number_id: phoneId, 
                     customer_phone: customerPhone, 
@@ -110,8 +114,15 @@ export const handleWaWebhook = async (req, res) => {
                   });
                   await conv.save();
                 } else {
+                  // Chat pehle se exist karta hai
                   conv.last_message = text;
                   conv.last_message_time = new Date(msg.timestamp * 1000);
+                  
+                  // 🔥 NAYA LOGIC: Agar naam "WA User" ya "Phone Number" hai, toh usko asli naam se replace karo
+                  if ((conv.customer_name === "WA User" || conv.customer_name === customerPhone) && incomingPushName) {
+                      conv.customer_name = incomingPushName;
+                  }
+                  
                   await conv.save();
                 }
 
@@ -135,7 +146,9 @@ export const handleWaWebhook = async (req, res) => {
                     });
                 }
 
-                // AI AUTO-REPLY LOGIC
+                // ===================================================================
+                // 🔥 AI AUTO-REPLY LOGIC
+                // ===================================================================
                 const account = await WhatsAppAccount.findOne({ phone_number_id: phoneId });
 
                 if (account && account.ai_enabled && conv.ai_enabled !== false) {
