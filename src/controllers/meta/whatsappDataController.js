@@ -1307,14 +1307,6 @@ export const deleteWhatsAppTemplate = async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
 export const subscribeWabaApp = async (req, res) => {
   try {
     // Route parameter ka naam kuch bhi ho (accountId ya phoneId), value yahan aayegi
