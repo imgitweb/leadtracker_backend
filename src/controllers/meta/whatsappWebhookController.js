@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 import WhatsAppConversation from "../../models/WhatsAppConversation.js";
 import WhatsAppMessage from "../../models/WhatsAppMessage.js";
 import WhatsAppAccount from "../../models/WhatsAppAccount.js"; 
-import WhatsAppCampaignLog from "../../models/WhatsAppCampaignLog.js"; // 🔥 Import Log Model
+import WhatsAppCampaignLog from "../../models/WhatsAppCampaignLog.js"; 
 import StartupData from "../../models/StartupData.js";         
 import { generateAIReply } from "../../utils/aiHelper.js";     
 
@@ -41,21 +41,18 @@ export const handleWaWebhook = async (req, res) => {
               const status = statusObj.status;     
               const recipientPhone = statusObj.recipient_id;
               
-              // Agar message fail hua hai toh error message nikal lo
               let errorMsg = null;
               if (status === "failed" && statusObj.errors) {
                   errorMsg = statusObj.errors[0]?.message || statusObj.errors[0]?.title;
               }
 
               try {
-                // 1. Update in WhatsAppMessage (For normal chat UI)
                 const updatedMessage = await WhatsAppMessage.findOneAndUpdate(
                   { message_id: messageId },
                   { status: status },
-                  { new: true } 
+                  { returnDocument: 'after' } 
                 );
 
-                // 2. Update in WhatsAppCampaignLog (For Campaign Reports)
                 let updateCampaignQuery = { $set: { "delivery_details.$.status": status } };
                 if (errorMsg) {
                    updateCampaignQuery.$set["delivery_details.$.error_message"] = errorMsg;
@@ -63,10 +60,10 @@ export const handleWaWebhook = async (req, res) => {
 
                 await WhatsAppCampaignLog.findOneAndUpdate(
                   { "delivery_details.message_id": messageId },
-                  updateCampaignQuery
+                  updateCampaignQuery,
+                  { returnDocument: 'after' }
                 );
 
-                // 3. Emit via Socket.io for Real-time Frontend Updates
                 const io = req.app.get('socketio');
                 if (io) {
                     io.emit("message_status_update", {
@@ -77,7 +74,6 @@ export const handleWaWebhook = async (req, res) => {
                         error: errorMsg
                     });
                 }
-
               } catch (err) {
                 console.error("Error updating message status in DB:", err);
               }
@@ -94,7 +90,6 @@ export const handleWaWebhook = async (req, res) => {
               const customerPhone = msg.from; 
               const text = msg.text.body;
               
-              // Meta se aane wala asli naam
               const incomingPushName = value.contacts?.[0]?.profile?.name; 
               const customerName = incomingPushName || customerPhone;
               const metaMessageId = msg.id; 
@@ -103,7 +98,6 @@ export const handleWaWebhook = async (req, res) => {
                 let conv = await WhatsAppConversation.findOne({ phone_number_id: phoneId, customer_phone: customerPhone });
                 
                 if (!conv) {
-                  // Naya Chat ban raha hai
                   conv = new WhatsAppConversation({
                     phone_number_id: phoneId, 
                     customer_phone: customerPhone, 
@@ -114,13 +108,16 @@ export const handleWaWebhook = async (req, res) => {
                   });
                   await conv.save();
                 } else {
-                  // Chat pehle se exist karta hai
                   conv.last_message = text;
                   conv.last_message_time = new Date(msg.timestamp * 1000);
                   
-                  // 🔥 NAYA LOGIC: Agar naam "WA User" ya "Phone Number" hai, toh usko asli naam se replace karo
-                  if ((conv.customer_name === "WA User" || conv.customer_name === customerPhone) && incomingPushName) {
-                      conv.customer_name = incomingPushName;
+                  if (incomingPushName) {
+                      const currentDbName = conv.customer_name ? conv.customer_name.toLowerCase().trim() : "";
+                      const isGenericName = currentDbName.includes("user") || conv.customer_name === customerPhone;
+                      
+                      if (isGenericName) {
+                          conv.customer_name = incomingPushName;
+                      }
                   }
                   
                   await conv.save();
@@ -147,7 +144,7 @@ export const handleWaWebhook = async (req, res) => {
                 }
 
                 // ===================================================================
-                // 🔥 AI AUTO-REPLY LOGIC
+                // 🔥 AI AUTO-REPLY & LEAD CAPTURE LOGIC
                 // ===================================================================
                 const account = await WhatsAppAccount.findOne({ phone_number_id: phoneId });
 
@@ -155,7 +152,47 @@ export const handleWaWebhook = async (req, res) => {
                   const startupContext = await StartupData.findOne({ userId: account.userId });
 
                   if (startupContext) {
-                    const aiReplyText = await generateAIReply(text, startupContext, "WhatsApp");
+                    // Fetch recent history (excluding the current message just saved)
+                    const recentMessages = await WhatsAppMessage.find({ 
+                      conversation_id: conv._id,
+                      _id: { $ne: newMsg._id } 
+                    })
+                    .sort({ createdAt: -1 })
+                    .limit(5);
+
+                    const formattedHistory = recentMessages.reverse().map(m => ({
+                      role: m.is_from_me ? "assistant" : "user",
+                      content: m.text
+                    }));
+
+                    const customerInfo = {
+                      phone: customerPhone,
+                      name: conv.customer_name,
+                      accountId: phoneId
+                    };
+
+                    // Execute AI Function
+                    const aiResult = await generateAIReply(
+                      text, 
+                      startupContext, 
+                      "WhatsApp", 
+                      "", 
+                      customerInfo, 
+                      formattedHistory
+                    );
+                    
+                    const aiReplyText = aiResult.text;
+
+                    // 🔥 Trigger Socket Alert if a lead was created or re-engaged
+                    if (aiResult.leadAction && io) {
+                      io.emit("hot_lead_detected", {
+                        action: aiResult.leadAction.type,
+                        leadName: aiResult.leadAction.lead.name,
+                        phone: aiResult.leadAction.lead.phone,
+                        conversationId: conv._id,
+                        summary: aiResult.leadAction.lead.aiSummary || "User is interested!"
+                      });
+                    }
                     
                     try {
                       const response = await axios.post(
@@ -173,7 +210,7 @@ export const handleWaWebhook = async (req, res) => {
 
                       const aiMsg = new WhatsAppMessage({
                         conversation_id: conv._id,
-                        message_id: sentMetaMessageId, // Save for webhook tracking
+                        message_id: sentMetaMessageId, 
                         sender_id: phoneId,          
                         receiver_id: customerPhone,
                         text: aiReplyText,
