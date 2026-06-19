@@ -577,6 +577,7 @@ const resolveTemplateText = (template, variables = []) => {
   }
 };
 
+
 export const sendBulkWaTemplate = async (req, res) => {
   try {
     const { phoneId } = req.params;
