@@ -499,42 +499,61 @@ export class BulkEmailService {
       });
 
       const batchResults = await Promise.all(batchPromises);
-      
+      const batchLog = [];
       batchResults.forEach(res => {
         if (res.success) {
           sentCount += 1;
-          sendLog.push({ email: res.email, status: 'sent', messageId: res.messageId, trackingId: res.trackingId, sentAt: new Date() });
+          batchLog.push({ email: res.email, status: 'sent', messageId: res.messageId, trackingId: res.trackingId, sentAt: new Date() });
         } else {
           failedCount += 1;
-          sendLog.push({ email: res.email, status: 'failed', error: res.error, trackingId: res.trackingId, sentAt: new Date() });
+          batchLog.push({ email: res.email, status: 'failed', error: res.error, trackingId: res.trackingId, sentAt: new Date() });
         }
       });
 
-      campaign.sentCount = sentCount;
-      campaign.failedCount = failedCount;
-      campaign.sendLog = sendLog;
-      await campaign.save();
-    }campaign.lastDispatchedAt = new Date();
-    campaign.status = failedCount === 0 ? 'sent' : (sentCount > 0 ? 'partially_sent' : 'failed');
-    if (failedCount > 0 && sentCount === 0) {
-      campaign.errorMessage = 'All recipients failed to receive the campaign';
+      // Use updateOne to prevent VersionError if trackOpen/trackUnsubscribe run concurrently
+      await EmailCampaign.updateOne(
+        { _id: campaign._id },
+        { 
+          $set: { sentCount, failedCount },
+          $push: { sendLog: { $each: batchLog } }
+        }
+      );
     }
 
-    await campaign.save();
+    const finalStatus = failedCount === 0 ? 'sent' : (sentCount > 0 ? 'partially_sent' : 'failed');
+    let errorMessage = campaign.errorMessage || '';
+    if (failedCount > 0 && sentCount === 0) {
+      errorMessage = 'All recipients failed to receive the campaign';
+    }
 
-    const actionUserId = userId || campaign.createdBy;
+    // Update final status and fetch the latest document
+    const updatedCampaign = await EmailCampaign.findByIdAndUpdate(
+      campaign._id,
+      {
+        $set: {
+          lastDispatchedAt: new Date(),
+          status: finalStatus,
+          errorMessage,
+          sentCount,
+          failedCount
+        }
+      },
+      { new: true }
+    );
+
+    const actionUserId = userId || updatedCampaign.createdBy;
     if (actionUserId) {
       await AuditLog.create({
         user: actionUserId,
         company: companyId,
         action: 'email_campaign_sent',
         resource: 'EmailCampaign',
-        resourceId: campaign._id,
-        description: `Sent email campaign: ${campaign.name} (${sentCount} sent, ${failedCount} failed)`,
+        resourceId: updatedCampaign._id,
+        description: `Sent email campaign: ${updatedCampaign.name} (${sentCount} sent, ${failedCount} failed)`,
       });
     }
 
-    return campaign.toObject();
+    return updatedCampaign.toObject();
   }
 
   static async dispatchDueCampaigns() {
