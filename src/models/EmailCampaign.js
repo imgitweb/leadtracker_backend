@@ -57,6 +57,15 @@ const emailCampaignSchema = new mongoose.Schema(
     failedCount: { type: Number, default: 0 },
     readCount: { type: Number, default: 0 },
     unsubscribeCount: { type: Number, default: 0 },
+    attachments: { 
+      type: [{
+        filename: { type: String, required: true },
+        path: { type: String, required: true },
+        size: { type: Number, default: 0 },
+        mimetype: { type: String, default: '' }
+      }],
+      default: []
+    },
     status: {
       type: String,
       enum: ['draft', 'scheduled', 'sending', 'sent', 'partially_sent', 'failed'],
