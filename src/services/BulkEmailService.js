@@ -148,6 +148,7 @@ const createCampaignDraft = async (companyId, creatorId, payload = {}) => {
     textSnapshot: selection.textBody,
     audienceSource: normalizeString(payload.audienceSource || 'manual') || 'manual',
     recipients,
+    attachments: payload.attachments || [],
     recipientCount: recipients.length,
     scheduleAt: shouldSendImmediately ? null : scheduleAt,
     status: shouldSendImmediately ? 'sending' : 'scheduled',
@@ -378,7 +379,12 @@ export class BulkEmailService {
 
   static async trackOpen(campaignId, trackingId) {
     await EmailCampaign.updateOne(
-      { _id: campaignId, 'sendLog.trackingId': trackingId, 'sendLog.openedAt': null },
+      { 
+        _id: campaignId, 
+        sendLog: { 
+          $elemMatch: { trackingId: trackingId, openedAt: null } 
+        } 
+      },
       { 
         $set: { 'sendLog.$.openedAt': new Date() },
         $inc: { readCount: 1 }
@@ -391,7 +397,12 @@ export class BulkEmailService {
     await this.trackOpen(campaignId, trackingId);
 
     const result = await EmailCampaign.updateOne(
-      { _id: campaignId, 'sendLog.trackingId': trackingId, 'sendLog.unsubscribedAt': null },
+      { 
+        _id: campaignId, 
+        sendLog: { 
+          $elemMatch: { trackingId: trackingId, unsubscribedAt: null } 
+        } 
+      },
       { 
         $set: { 'sendLog.$.unsubscribedAt': new Date() },
         $inc: { unsubscribeCount: 1 }
@@ -450,27 +461,15 @@ export class BulkEmailService {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 </head>
 <body style="margin: 0; padding: 0; background-color: #f6f9fc; font-family: system-ui, -apple-system, sans-serif;">
-  <table width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #f6f9fc; padding: 40px 0;">
-    <tr>
-      <td align="center" valign="top">
-        <table width="100%" border="0" cellpadding="0" cellspacing="0" style="max-width: 600px; width: 100%; margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
-          <tr>
-            <td align="left" valign="top" style="font-family: system-ui, -apple-system, sans-serif; font-size: 16px; line-height: 1.6; color: #333333; padding: 30px;">
-              ${html}
-              <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #666; text-align: center;">
-                If you no longer wish to receive these emails, you can <a href="${unsubTrackUrl}" style="color: #0066cc; text-decoration: underline;">unsubscribe here</a>.
-              </div>
-              <img src="${openTrackUrl}" width="1" height="1" style="display:none; visibility:hidden; opacity:0;" alt="" />
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
+  ${html}
+  <div style="margin-top: 20px; padding: 20px; font-size: 12px; color: #666; text-align: center;">
+    If you no longer wish to receive these emails, you can <a href="${unsubTrackUrl}" style="color: #0066cc; text-decoration: underline;">unsubscribe here</a>.
+  </div>
+  <img src="${openTrackUrl}" width="1" height="1" style="display:none; visibility:hidden; opacity:0;" alt="" />
 </body>
 </html>`;
 
-          const result = await transport.sendMail({
+          const mailOptions = {
             from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
             to: recipient.email,
             subject,
@@ -481,7 +480,17 @@ export class BulkEmailService {
               'List-Unsubscribe': `<${unsubTrackUrl}>`,
               'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
             }
-          });
+          };
+
+          if (campaign.attachments && campaign.attachments.length > 0) {
+            mailOptions.attachments = campaign.attachments.map(att => ({
+              filename: att.filename,
+              path: att.path,
+              contentType: att.mimetype
+            }));
+          }
+
+          const result = await transport.sendMail(mailOptions);
 
           return { success: true, email: recipient.email, messageId: result.messageId || '', trackingId };
         } catch (error) {
@@ -490,42 +499,61 @@ export class BulkEmailService {
       });
 
       const batchResults = await Promise.all(batchPromises);
-      
+      const batchLog = [];
       batchResults.forEach(res => {
         if (res.success) {
           sentCount += 1;
-          sendLog.push({ email: res.email, status: 'sent', messageId: res.messageId, trackingId: res.trackingId, sentAt: new Date() });
+          batchLog.push({ email: res.email, status: 'sent', messageId: res.messageId, trackingId: res.trackingId, sentAt: new Date() });
         } else {
           failedCount += 1;
-          sendLog.push({ email: res.email, status: 'failed', error: res.error, trackingId: res.trackingId, sentAt: new Date() });
+          batchLog.push({ email: res.email, status: 'failed', error: res.error, trackingId: res.trackingId, sentAt: new Date() });
         }
       });
 
-      campaign.sentCount = sentCount;
-      campaign.failedCount = failedCount;
-      campaign.sendLog = sendLog;
-      await campaign.save();
-    }campaign.lastDispatchedAt = new Date();
-    campaign.status = failedCount === 0 ? 'sent' : (sentCount > 0 ? 'partially_sent' : 'failed');
-    if (failedCount > 0 && sentCount === 0) {
-      campaign.errorMessage = 'All recipients failed to receive the campaign';
+      // Use updateOne to prevent VersionError if trackOpen/trackUnsubscribe run concurrently
+      await EmailCampaign.updateOne(
+        { _id: campaign._id },
+        { 
+          $set: { sentCount, failedCount },
+          $push: { sendLog: { $each: batchLog } }
+        }
+      );
     }
 
-    await campaign.save();
+    const finalStatus = failedCount === 0 ? 'sent' : (sentCount > 0 ? 'partially_sent' : 'failed');
+    let errorMessage = campaign.errorMessage || '';
+    if (failedCount > 0 && sentCount === 0) {
+      errorMessage = 'All recipients failed to receive the campaign';
+    }
 
-    const actionUserId = userId || campaign.createdBy;
+    // Update final status and fetch the latest document
+    const updatedCampaign = await EmailCampaign.findByIdAndUpdate(
+      campaign._id,
+      {
+        $set: {
+          lastDispatchedAt: new Date(),
+          status: finalStatus,
+          errorMessage,
+          sentCount,
+          failedCount
+        }
+      },
+      { new: true }
+    );
+
+    const actionUserId = userId || updatedCampaign.createdBy;
     if (actionUserId) {
       await AuditLog.create({
         user: actionUserId,
         company: companyId,
         action: 'email_campaign_sent',
         resource: 'EmailCampaign',
-        resourceId: campaign._id,
-        description: `Sent email campaign: ${campaign.name} (${sentCount} sent, ${failedCount} failed)`,
+        resourceId: updatedCampaign._id,
+        description: `Sent email campaign: ${updatedCampaign.name} (${sentCount} sent, ${failedCount} failed)`,
       });
     }
 
-    return campaign.toObject();
+    return updatedCampaign.toObject();
   }
 
   static async dispatchDueCampaigns() {

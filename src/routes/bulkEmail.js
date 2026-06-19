@@ -18,6 +18,8 @@ import {
   trackUnsubscribe,
 } from '../controllers/bulkEmailController.js';
 
+import { uploadEmailAttachments } from '../config/bulkEmailMulter.js';
+
 const router = express.Router();
 
 // Public tracking routes (unauthenticated)
@@ -35,7 +37,7 @@ router.post('/templates', createTemplate);
 router.patch('/templates/:templateId', updateTemplate);
 router.delete('/templates/:templateId', deleteTemplate);
 router.get('/campaigns', listCampaigns);
-router.post('/campaigns', createCampaign);
+router.post('/campaigns', uploadEmailAttachments.array('attachments', 5), createCampaign);
 router.delete('/campaigns/:campaignId', deleteCampaign);
 router.post('/campaigns/:campaignId/send', sendCampaign);
 router.post('/dispatch-due', dispatchDueCampaigns);
