@@ -69,7 +69,30 @@ export const listCampaigns = async (req, res) => {
 
 export const createCampaign = async (req, res) => {
   try {
-    const campaign = await BulkEmailService.createCampaign(req.user.company._id, req.user._id, req.body);
+    console.log("createCampaign received body:", req.body);
+    console.log("createCampaign received headers:", req.headers['content-type']);
+    const payload = { ...req.body };
+    
+    // Parse recipients if sent as JSON string via FormData
+    if (typeof payload.recipients === 'string') {
+      try {
+        payload.recipients = JSON.parse(payload.recipients);
+      } catch (e) {
+        payload.recipients = [];
+      }
+    }
+
+    // Process attachments
+    if (req.files && req.files.length > 0) {
+      payload.attachments = req.files.map(file => ({
+        filename: file.originalname,
+        path: file.path,
+        size: file.size,
+        mimetype: file.mimetype
+      }));
+    }
+
+    const campaign = await BulkEmailService.createCampaign(req.user.company._id, req.user._id, payload);
 
     if (campaign.status === 'sending') {
       const sentCampaign = await BulkEmailService.sendCampaign(req.user.company._id, campaign._id, req.user._id);

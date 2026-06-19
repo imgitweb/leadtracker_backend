@@ -51,9 +51,33 @@ const leadSchema = new mongoose.Schema(
       index: true
     },
 
+    // 📱 SMART PHONE FIELD (Automatic Normalization)
     phone: {
       type: String,
-      index: true
+      index: true,
+      set: function(num) {
+        if (!num) return num;
+        // Step 1: Remove all spaces, +, -, etc. (Keep only numbers)
+        let cleanNum = num.replace(/\D/g, ''); 
+        
+        // Step 2: Indian Number Logic - Agar 12 digit hai aur 91 se start hai, toh 91 hata do
+        if (cleanNum.length === 12 && cleanNum.startsWith('91')) {
+          return cleanNum.substring(2); // Returns 10 digit number e.g., 8103306133
+        }
+        return cleanNum; // Returns as is if not 12 digits
+      }
+    },
+
+    // 🤖 AI & Platform Specific Data (NEW FIELDS)
+    aiSummary: {
+      type: String // User kya chahta hai (Intent) yahan aayega
+    },
+
+    platformDetails: {
+      instagramUsername: { type: String, index: true },
+      facebookUsername: { type: String, index: true },
+      whatsappRawNumber: { type: String }, // Exact Meta API number (e.g., 918103306133) reply bhejne ke liye
+      platformAccountId: { type: String, index: true } // Jis Page ID ya WA Phone ID par message aaya tha
     },
 
     // 👥 Assignment (Quick Access)
@@ -95,13 +119,12 @@ const leadSchema = new mongoose.Schema(
       }
     ],
 
-    // 📊 Tracking
+    // 📊 Tracking (No enum, default Website)
     source: {
       type: String,
       default: "Website",
     },
-
-
+    
     tags: [String],
 
   },
@@ -116,11 +139,10 @@ const leadSchema = new mongoose.Schema(
 // Fast filtering
 leadSchema.index({ companyId: 1, status: 1 });
 leadSchema.index({ companyId: 1, formId: 1 });
+leadSchema.index({ companyId: 1, source: 1 }); // Quick filter by source (helpful for AI leads)
 
 // Analytics
 leadSchema.index({ companyId: 1, createdAt: -1 });
-
-
 
 const Lead = mongoose.model('Lead', leadSchema);
 export default Lead;
