@@ -84,7 +84,7 @@ const io = new Server(server, {
   },
 });
 
-app.set("socketio", io);
+app.set('socketio', io);
 
 await connectDB();
 await CompanyModuleService.syncSystemModules();
@@ -163,7 +163,7 @@ app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/knowledge-repository', knowledgeRepositoryRoutes);
 app.use('/api/superadmin', superAdminRoutes);
-
+app.use('/api/bulk-email', bulkEmailRoutes);
 
 app.use("/api/ai", aiRoutes);
 app.use("/api/chat", chatRoutes);
@@ -196,8 +196,7 @@ app.use(errorHandler);
 // ============ SOCKET.IO CONNECTION ============
 io.on("connection", (socket) => {
   console.log(`🟢 New Client Connected: ${socket.id}`);
-
-  socket.on("disconnect", () => {
+  socket.on('disconnect', () => {
     console.log(`🔴 Client Disconnected: ${socket.id}`);
   });
 });
