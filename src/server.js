@@ -165,7 +165,6 @@ app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/knowledge-repository', knowledgeRepositoryRoutes);
 app.use('/api/superadmin', superAdminRoutes);
-// app.use('/api/bulk-email', bulkEmailRoutes);
 
 app.use("/api/ai", aiRoutes);
 app.use("/api/chat", chatRoutes);
