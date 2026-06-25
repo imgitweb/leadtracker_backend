@@ -13,13 +13,7 @@ const isAdminUser = (user) =>
   ADMIN_ROLES.includes((user?.role || "").toLowerCase());
 
 const buildLeadAccessQuery = (req) => {
-  const query = {
-    companyId: req.user.company._id,
-    $nor: [
-      { name: { $regex: /^test$/i } },
-      { phone: { $in: ["+1", "+91", ""] } },
-    ],
-  };
+  const query = { companyId: req.user.company._id };
   if (!isAdminUser(req.user)) {
     query.$or = [{ createdBy: req.user._id }, { assignedTo: req.user._id }];
   }
