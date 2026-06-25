@@ -559,8 +559,6 @@ export const refreshTemplateStatus = async (req, res) => {
 // ==========================================
 // 9. POST SENT BULK TEMPLATE 
 // ==========================================
-
-
 const resolveTemplateText = (template, variables = []) => {
   try {
     const bodyComponent = template?.components?.find(c => c.type?.toLowerCase() === "body");
@@ -577,11 +575,11 @@ const resolveTemplateText = (template, variables = []) => {
   }
 };
 
-
 export const sendBulkWaTemplate = async (req, res) => {
   try {
+    console.log("--- Bulk Campaign Hit ---");
     const { phoneId } = req.params;
-    const { templateName, language, recipients } = req.body;
+    const { templateName, language, recipients, headerMedia } = req.body;
     const userId = req.user?._id;
 
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
@@ -591,24 +589,71 @@ export const sendBulkWaTemplate = async (req, res) => {
     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
     if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
 
-    // Yahan hum template fetch kar rahe hain, jisme se hume _id aur meta_template_id mil jayega
     const template = await WhatsAppTemplate.findOne({ 
       phone_number_id: phoneId, 
       name: templateName 
     });
+    
     if (!template) return res.status(404).json({ error: "Template not found." });
 
-    // --- FIX 1: Normalize Phones & Remove Duplicates ---
+    // ---------------------------------------------------------
+    // 1. Handle Header Media Upload (Only ONCE per campaign)
+    // ---------------------------------------------------------
+    let uploadedMediaId = null;
+    if (headerMedia) {
+      try {
+        let buffer;
+        let mimeType = 'image/jpeg'; // Default fallback
+
+        // Safely extract Base64 whether it has a data URI prefix or not
+        if (headerMedia.startsWith('data:')) {
+          const matches = headerMedia.match(/^data:(.+);base64,(.+)$/);
+          if (matches && matches.length === 3) {
+            mimeType = matches[1];
+            buffer = Buffer.from(matches[2], 'base64');
+          }
+        } else {
+          buffer = Buffer.from(headerMedia, 'base64');
+        }
+
+        if (buffer) {
+          const form = new FormData();
+          const fileExtension = mimeType.split('/')[1] || 'jpg';
+          const fileType = mimeType.split('/')[0] || 'image'; // image, video, or document
+          
+          form.append('file', buffer, { filename: `header_media.${fileExtension}`, contentType: mimeType });
+          form.append('type', fileType);
+          form.append('messaging_product', 'whatsapp');
+
+          const uploadRes = await axios.post(
+            `https://graph.facebook.com/v23.0/${phoneId}/media`,
+            form,
+            {
+              headers: {
+                ...form.getHeaders(),
+                Authorization: `Bearer ${account.access_token}`
+              },
+              maxBodyLength: Infinity // 🔥 CRITICAL FIX: Required for uploading buffers in Axios
+            }
+          );
+          uploadedMediaId = uploadRes.data.id;
+          console.log("Media uploaded successfully. Media ID:", uploadedMediaId);
+        }
+      } catch (uploadErr) {
+        console.error("Media upload error:", uploadErr.response?.data || uploadErr.message);
+        return res.status(400).json({ error: "Failed to upload header media to Meta. Ensure the file is valid." });
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 2. Normalize Phones & Remove Duplicates
+    // ---------------------------------------------------------
     const uniqueRecipientsMap = new Map();
-    
     for (const rec of recipients) {
       if (!rec.phone) continue;
       
       let cleanedPhone = String(rec.phone).replace(/[^0-9]/g, '');
-      
-      if (cleanedPhone.length === 10) {
-        cleanedPhone = '91' + cleanedPhone;
-      }
+      if (cleanedPhone.length === 10) cleanedPhone = '91' + cleanedPhone;
 
       if (!uniqueRecipientsMap.has(cleanedPhone)) {
         uniqueRecipientsMap.set(cleanedPhone, { ...rec, phone: cleanedPhone });
@@ -616,19 +661,62 @@ export const sendBulkWaTemplate = async (req, res) => {
     }
 
     const uniqueRecipients = Array.from(uniqueRecipientsMap.values());
-
     const results = { total: uniqueRecipients.length, success: 0, failed: 0, errors: [] };
     const deliveryDetails = [];
 
+    // ---------------------------------------------------------
+    // 3. Analyze Template Requirements Safely
+    // ---------------------------------------------------------
+    const tplHeader = template.components?.find(c => c.type?.toUpperCase() === "HEADER");
+    const headerFormat = tplHeader?.format?.toUpperCase(); // IMAGE, VIDEO, DOCUMENT
+    const requiresMediaHeader = ["IMAGE", "DOCUMENT", "VIDEO"].includes(headerFormat);
+    const defaultMediaLink = tplHeader?.example?.header_handle?.[0] || null;
+
+    // Determine exact body variables required by the template
+    const bodyComp = template.components?.find(c => c.type?.toUpperCase() === "BODY");
+    const bodyText = bodyComp?.text || "";
+    const bodyVarMatches = bodyText.match(/\{\{\d+\}\}/g) || [];
+    const uniqueBodyVarsCount = new Set(bodyVarMatches.map(v => v.match(/\d+/)[0])).size;
+
+    // ---------------------------------------------------------
+    // 4. Send Messages
+    // ---------------------------------------------------------
     for (const rec of uniqueRecipients) {
       try {
         const cleanedPhone = rec.phone;
-
         const components = [];
-        if (rec.variables && rec.variables.length > 0) {
+
+        // --- Build Header Component (Dynamic for Image/Video/Document) ---
+        if (requiresMediaHeader) {
+          const mediaType = headerFormat.toLowerCase(); // 'image', 'video', or 'document'
+          const headerParams = { type: mediaType, [mediaType]: {} };
+          
+          if (uploadedMediaId) {
+            headerParams[mediaType].id = uploadedMediaId;
+          } else if (defaultMediaLink) {
+            headerParams[mediaType].link = defaultMediaLink;
+            // Note: If defaultMediaLink is an internal 'scontent.whatsapp.net' link, 
+            // Meta may reject it. You MUST upload a new image if Meta blocks the default.
+          }
+
+          if (headerParams[mediaType].id || headerParams[mediaType].link) {
+            components.push({
+              type: "header",
+              parameters: [headerParams]
+            });
+          }
+        }
+
+        // --- Build Body Component (STRICT MATCHING) ---
+        if (uniqueBodyVarsCount > 0) {
+          const parameters = [];
+          for (let i = 0; i < uniqueBodyVarsCount; i++) {
+            const val = (rec.variables && rec.variables[i]) ? rec.variables[i] : " ";
+            parameters.push({ type: "text", text: String(val) });
+          }
           components.push({
             type: "body",
-            parameters: rec.variables.map(val => ({ type: "text", text: String(val || " ") })),
+            parameters
           });
         }
 
@@ -639,11 +727,11 @@ export const sendBulkWaTemplate = async (req, res) => {
           template: {
             name: templateName,
             language: { code: language || "en" },
-            components: components.length > 0 ? components : undefined,
+            ...(components.length > 0 && { components })
           },
         };
 
-        // Send via Meta
+        // --- Fire API Request ---
         const metaResponse = await axios.post(
           `https://graph.facebook.com/v23.0/${phoneId}/messages`,
           payload,
@@ -652,13 +740,14 @@ export const sendBulkWaTemplate = async (req, res) => {
               Authorization: `Bearer ${account.access_token}`,
               "Content-Type": "application/json",
             },
-            timeout: 12000
+            timeout: 15000 // Slightly increased timeout for media payloads
           }
         );
 
         const messageId = metaResponse.data?.messages?.[0]?.id || `wamid_${Date.now()}`;
         const resolvedText = resolveTemplateText(template, rec.variables || []);
 
+        // --- Update DB (Matches your exact Schema) ---
         const conversationUpdate = {
           $set: {
             last_message: resolvedText, 
@@ -678,7 +767,6 @@ export const sendBulkWaTemplate = async (req, res) => {
           { upsert: true, returnDocument: 'after' } 
         );
 
-        // 🔥 Webhook Tracking: is_read: true hata diya, aur status "sent" rakha
         await WhatsAppMessage.create({
           message_id: messageId,
           status: "sent",
@@ -689,39 +777,43 @@ export const sendBulkWaTemplate = async (req, res) => {
           is_from_me: true,
           message_type: "template",
           template_name: templateName,
-          template_id: template._id,                   // <-- ADDED
-          meta_template_id: template.meta_template_id  // <-- ADDED
+          template_id: template._id,                  
+          meta_template_id: template.meta_template_id 
         });
 
         results.success++;
         deliveryDetails.push({
           phone: cleanedPhone,
-          status: "sent", // 🔥 "success" ki jagah "sent" kiya taaki Webhook update kar sake
+          status: "sent", 
           message_id: messageId,
           error_message: null
         });
 
       } catch (err) {
+        const metaApiError = err.response?.data?.error?.message || err.message;
+        console.error(`Meta API Error for ${rec.phone}:`, JSON.stringify(err.response?.data || metaApiError));
+        
         results.failed++;
-        const errorMsg = err.response?.data?.error?.message || err.message || "Failed to process.";
-        results.errors.push({ phone: rec.phone, error: errorMsg });
+        results.errors.push({ phone: rec.phone, error: metaApiError });
         
         deliveryDetails.push({
           phone: rec.phone,
-          status: "failed", // Failed toh pehle se hi theek hai
+          status: "failed", 
           message_id: null,
-          error_message: errorMsg
+          error_message: metaApiError
         });
       }
     }
 
-    // Campaign Log mein save karna
+    // ---------------------------------------------------------
+    // 5. Finalize Log & Send Response
+    // ---------------------------------------------------------
     await WhatsAppCampaignLog.create({
       userId: userId,
       phone_number_id: phoneId,
       template_name: templateName,
-      template_id: template._id,                   // <-- ADDED
-      meta_template_id: template.meta_template_id, // <-- ADDED
+      template_id: template._id,                  
+      meta_template_id: template.meta_template_id,
       total_recipients: results.total,
       successful_sends: results.success,
       failed_sends: results.failed,
@@ -730,7 +822,7 @@ export const sendBulkWaTemplate = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `Campaign Processing Complete. Success: ${results.success}, Failed: ${results.failed}`,
+      message: `Campaign Complete. Success: ${results.success}, Failed: ${results.failed}`,
       results,
     });
 
@@ -739,6 +831,187 @@ export const sendBulkWaTemplate = async (req, res) => {
     res.status(500).json({ error: "Failed to process campaign." });
   }
 };
+
+
+
+// const resolveTemplateText = (template, variables = []) => {
+//   try {
+//     const bodyComponent = template?.components?.find(c => c.type?.toLowerCase() === "body");
+//     if (!bodyComponent || !bodyComponent.text) return `[Template: ${template?.name || 'WhatsApp Template'}]`;
+
+//     let text = bodyComponent.text;
+//     variables.forEach((val, index) => {
+//       text = text.replace(new RegExp(`\\{\\{${index + 1}\\}\\}`, "g"), val || "");
+//     });
+//     return text;
+//   } catch (err) {
+//     console.error("Error resolving template:", err);
+//     return "Template message processed and sent.";
+//   }
+// };
+
+
+// export const sendBulkWaTemplate = async (req, res) => {
+//   try {
+//     const { phoneId } = req.params;
+//     const { templateName, language, recipients } = req.body;
+//     const userId = req.user?._id;
+
+//     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+//       return res.status(400).json({ error: "Recipients data array is mandatory." });
+//     }
+
+//     const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+//     if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
+
+//     // Yahan hum template fetch kar rahe hain, jisme se hume _id aur meta_template_id mil jayega
+//     const template = await WhatsAppTemplate.findOne({ 
+//       phone_number_id: phoneId, 
+//       name: templateName 
+//     });
+//     if (!template) return res.status(404).json({ error: "Template not found." });
+
+//     // --- FIX 1: Normalize Phones & Remove Duplicates ---
+//     const uniqueRecipientsMap = new Map();
+    
+//     for (const rec of recipients) {
+//       if (!rec.phone) continue;
+      
+//       let cleanedPhone = String(rec.phone).replace(/[^0-9]/g, '');
+      
+//       if (cleanedPhone.length === 10) {
+//         cleanedPhone = '91' + cleanedPhone;
+//       }
+
+//       if (!uniqueRecipientsMap.has(cleanedPhone)) {
+//         uniqueRecipientsMap.set(cleanedPhone, { ...rec, phone: cleanedPhone });
+//       }
+//     }
+
+//     const uniqueRecipients = Array.from(uniqueRecipientsMap.values());
+
+//     const results = { total: uniqueRecipients.length, success: 0, failed: 0, errors: [] };
+//     const deliveryDetails = [];
+
+//     for (const rec of uniqueRecipients) {
+//       try {
+//         const cleanedPhone = rec.phone;
+
+//         const components = [];
+//         if (rec.variables && rec.variables.length > 0) {
+//           components.push({
+//             type: "body",
+//             parameters: rec.variables.map(val => ({ type: "text", text: String(val || " ") })),
+//           });
+//         }
+
+//         const payload = {
+//           messaging_product: "whatsapp",
+//           to: cleanedPhone,
+//           type: "template",
+//           template: {
+//             name: templateName,
+//             language: { code: language || "en" },
+//             components: components.length > 0 ? components : undefined,
+//           },
+//         };
+
+//         // Send via Meta
+//         const metaResponse = await axios.post(
+//           `https://graph.facebook.com/v23.0/${phoneId}/messages`,
+//           payload,
+//           {
+//             headers: {
+//               Authorization: `Bearer ${account.access_token}`,
+//               "Content-Type": "application/json",
+//             },
+//             timeout: 12000
+//           }
+//         );
+
+//         const messageId = metaResponse.data?.messages?.[0]?.id || `wamid_${Date.now()}`;
+//         const resolvedText = resolveTemplateText(template, rec.variables || []);
+
+//         const conversationUpdate = {
+//           $set: {
+//             last_message: resolvedText, 
+//             last_message_time: new Date(),
+//           },
+//           $setOnInsert: {
+//             phone_number_id: phoneId,      
+//             customer_phone: cleanedPhone,  
+//             ai_enabled: true,
+//             customer_name: rec.name || "WA User", 
+//           },
+//         };
+
+//         const conversation = await WhatsAppConversation.findOneAndUpdate(
+//           { phone_number_id: phoneId, customer_phone: cleanedPhone }, 
+//           conversationUpdate,
+//           { upsert: true, returnDocument: 'after' } 
+//         );
+
+//         // 🔥 Webhook Tracking: is_read: true hata diya, aur status "sent" rakha
+//         await WhatsAppMessage.create({
+//           message_id: messageId,
+//           status: "sent",
+//           conversation_id: conversation._id,
+//           sender_id: phoneId,
+//           receiver_id: cleanedPhone,
+//           text: resolvedText,
+//           is_from_me: true,
+//           message_type: "template",
+//           template_name: templateName,
+//           template_id: template._id,                   // <-- ADDED
+//           meta_template_id: template.meta_template_id  // <-- ADDED
+//         });
+
+//         results.success++;
+//         deliveryDetails.push({
+//           phone: cleanedPhone,
+//           status: "sent", // 🔥 "success" ki jagah "sent" kiya taaki Webhook update kar sake
+//           message_id: messageId,
+//           error_message: null
+//         });
+
+//       } catch (err) {
+//         results.failed++;
+//         const errorMsg = err.response?.data?.error?.message || err.message || "Failed to process.";
+//         results.errors.push({ phone: rec.phone, error: errorMsg });
+        
+//         deliveryDetails.push({
+//           phone: rec.phone,
+//           status: "failed", // Failed toh pehle se hi theek hai
+//           message_id: null,
+//           error_message: errorMsg
+//         });
+//       }
+//     }
+
+//     // Campaign Log mein save karna
+//     await WhatsAppCampaignLog.create({
+//       userId: userId,
+//       phone_number_id: phoneId,
+//       template_name: templateName,
+//       template_id: template._id,                   // <-- ADDED
+//       meta_template_id: template.meta_template_id, // <-- ADDED
+//       total_recipients: results.total,
+//       successful_sends: results.success,
+//       failed_sends: results.failed,
+//       delivery_details: deliveryDetails
+//     });
+
+//     res.status(200).json({
+//       success: true,
+//       message: `Campaign Processing Complete. Success: ${results.success}, Failed: ${results.failed}`,
+//       results,
+//     });
+
+//   } catch (error) {
+//     console.error("Critical Route Error:", error);
+//     res.status(500).json({ error: "Failed to process campaign." });
+//   }
+// };
 
 // ==========================================
 // 10. GET TEMPLATE ANALYTICS (Sent, Delivered, Read)
