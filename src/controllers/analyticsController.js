@@ -1,11 +1,12 @@
-import mongoose from 'mongoose';
-import Lead from '../models/Lead.js';
-import Form from '../models/Form.js';
-import { sendResponse, sendError, getPagination } from '../utils/helpers.js';
+import mongoose from "mongoose";
+import Lead from "../models/Lead.js";
+import Form from "../models/Form.js";
+import { sendResponse, sendError, getPagination } from "../utils/helpers.js";
 
-const ADMIN_ROLES = ['admin', 'super_admin'];
+const ADMIN_ROLES = ["admin", "super_admin", "lead_manager"];
 
-const isAdminUser = (user) => ADMIN_ROLES.includes((user?.role || '').toLowerCase());
+const isAdminUser = (user) =>
+  ADMIN_ROLES.includes((user?.role || "").toLowerCase());
 
 const buildLeadScopeMatch = (req, extraMatch = {}) => {
   const match = {
@@ -14,43 +15,55 @@ const buildLeadScopeMatch = (req, extraMatch = {}) => {
   };
 
   if (!isAdminUser(req.user)) {
-    match.$or = [
-      { createdBy: req.user._id },
-      { assignedTo: req.user._id },
-    ];
+    match.$or = [{ createdBy: req.user._id }, { assignedTo: req.user._id }];
   }
 
   return match;
 };
 
-
 export const getCompanyAnalytics = async (req, res) => {
   try {
     const companyId = req.user.company._id;
     // Ensure we have a proper ObjectId instance for aggregation matches
-    const companyObjectId = (companyId && companyId._bsontype === 'ObjectID')
-      ? companyId
-      : new mongoose.Types.ObjectId(companyId);
+    const companyObjectId =
+      companyId && companyId._bsontype === "ObjectID"
+        ? companyId
+        : new mongoose.Types.ObjectId(companyId);
 
     const { page = 1, limit = 10, days = 7 } = req.query;
     const { skip, limit: lim } = getPagination(page, limit);
 
     // Basic counts
     const totalLeads = await Lead.countDocuments(buildLeadScopeMatch(req));
-    const activeFormsCount = await Form.countDocuments({ companyId: companyObjectId, isActive: true });
+    const activeFormsCount = await Form.countDocuments({
+      companyId: companyObjectId,
+      isActive: true,
+    });
 
     // ─── Per-Status Counts (for stat cards) ───────────────────────────────
-    const newLeads        = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'New' }));
-    const qualifiedLeads  = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Qualified' }));
-    const openCases       = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Support' }));
-    const inConversation  = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Contacted' }));
-    const convertedLeads  = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Converted' }));
-    const lostLeads       = await Lead.countDocuments(buildLeadScopeMatch(req, { status: 'Lost' }));
+    const newLeads = await Lead.countDocuments(
+      buildLeadScopeMatch(req, { status: "New" }),
+    );
+    const qualifiedLeads = await Lead.countDocuments(
+      buildLeadScopeMatch(req, { status: "Qualified" }),
+    );
+    const openCases = await Lead.countDocuments(
+      buildLeadScopeMatch(req, { status: "Support" }),
+    );
+    const inConversation = await Lead.countDocuments(
+      buildLeadScopeMatch(req, { status: "Contacted" }),
+    );
+    const convertedLeads = await Lead.countDocuments(
+      buildLeadScopeMatch(req, { status: "Converted" }),
+    );
+    const lostLeads = await Lead.countDocuments(
+      buildLeadScopeMatch(req, { status: "Lost" }),
+    );
 
     // ─── Leads by Status (grouped) ─────────────────────────────────────────
     const leadsByStatusAgg = await Lead.aggregate([
       { $match: buildLeadScopeMatch(req) },
-      { $group: { _id: '$status', count: { $sum: 1 } } },
+      { $group: { _id: "$status", count: { $sum: 1 } } },
     ]);
     const leadsByStatus = leadsByStatusAgg.reduce((acc, cur) => {
       acc[cur._id] = cur.count;
@@ -62,7 +75,7 @@ export const getCompanyAnalytics = async (req, res) => {
       { $match: buildLeadScopeMatch(req) },
       {
         $group: {
-          _id: { $ifNull: ['$source', 'Organic'] },
+          _id: { $ifNull: ["$source", "Organic"] },
           count: { $sum: 1 },
         },
       },
@@ -70,7 +83,7 @@ export const getCompanyAnalytics = async (req, res) => {
       { $limit: 10 },
     ]);
     const leadsBySource = leadsBySourceAgg.map((item) => ({
-      source: item._id || 'Organic',
+      source: item._id || "Organic",
       count: item.count,
     }));
 
@@ -84,11 +97,11 @@ export const getCompanyAnalytics = async (req, res) => {
       { $match: buildLeadScopeMatch(req, { createdAt: { $gte: startDate } }) },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
+          _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
           count: { $sum: 1 },
           qualified: {
             $sum: {
-              $cond: [{ $eq: ['$status', 'Qualified'] }, 1, 0],
+              $cond: [{ $eq: ["$status", "Qualified"] }, 1, 0],
             },
           },
         },
@@ -101,7 +114,7 @@ export const getCompanyAnalytics = async (req, res) => {
     for (let i = 0; i < daysInt; i++) {
       const d = new Date();
       d.setDate(d.getDate() - (daysInt - 1) + i);
-      const key = d.toISOString().split('T')[0];
+      const key = d.toISOString().split("T")[0];
       const found = submissionsByDayAgg.find((x) => x._id === key);
       submissionsByDay.push({
         date: key,
@@ -113,24 +126,26 @@ export const getCompanyAnalytics = async (req, res) => {
     // ─── Upcoming follow-ups (paginated) ───────────────────────────────────
     const followUpPipeline = [
       { $match: buildLeadScopeMatch(req) },
-      { $unwind: '$followUps' },
-      { $match: { 'followUps.nextFollowUpDate': { $exists: true, $ne: null } } },
+      { $unwind: "$followUps" },
+      {
+        $match: { "followUps.nextFollowUpDate": { $exists: true, $ne: null } },
+      },
       {
         $project: {
           _id: 0,
-          leadId: '$_id',
-          leadName: '$name',
-          leadEmail: '$email',
-          leadPhone: '$phone',
-          nextFollowUpDate: '$followUps.nextFollowUpDate',
-          note: '$followUps.note',
-          followUpCreatedBy: '$followUps.createdBy',
+          leadId: "$_id",
+          leadName: "$name",
+          leadEmail: "$email",
+          leadPhone: "$phone",
+          nextFollowUpDate: "$followUps.nextFollowUpDate",
+          note: "$followUps.note",
+          followUpCreatedBy: "$followUps.createdBy",
         },
       },
       { $sort: { nextFollowUpDate: 1 } },
       {
         $facet: {
-          metadata: [{ $count: 'total' }],
+          metadata: [{ $count: "total" }],
           data: [{ $skip: skip }, { $limit: lim }],
         },
       },
@@ -143,17 +158,22 @@ export const getCompanyAnalytics = async (req, res) => {
     // ─── Open Tickets ──────────────────────────────────────────────────────
     let openTickets = 0;
     try {
-      const SupportTicketModel = (await import('../models/SupportTicket.js')).default;
+      const SupportTicketModel = (await import("../models/SupportTicket.js"))
+        .default;
       openTickets = await SupportTicketModel.countDocuments(
         isAdminUser(req.user)
-          ? { companyId, status: { $ne: 'Closed' } }
-          : { companyId, status: { $ne: 'Closed' }, $or: [{ createdBy: req.user._id }, { assignedTo: req.user._id }] }
+          ? { companyId, status: { $ne: "Closed" } }
+          : {
+              companyId,
+              status: { $ne: "Closed" },
+              $or: [{ createdBy: req.user._id }, { assignedTo: req.user._id }],
+            },
       );
     } catch (e) {
       openTickets = 0;
     }
 
-    return sendResponse(res, 200, true, 'Analytics fetched successfully', {
+    return sendResponse(res, 200, true, "Analytics fetched successfully", {
       // ── Totals ──
       totalLeads,
       websiteTotalLeads: totalLeads,
@@ -181,8 +201,8 @@ export const getCompanyAnalytics = async (req, res) => {
       perPage: parseInt(limit),
     });
   } catch (error) {
-    console.error('Analytics error', error);
-    return sendError(res, 500, 'Failed to fetch analytics', error);
+    console.error("Analytics error", error);
+    return sendError(res, 500, "Failed to fetch analytics", error);
   }
 };
 
