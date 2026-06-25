@@ -1,8 +1,7 @@
 import StartupData from "../models/StartupData.js";
 import InstagramAccount from "../models/InstagramAccount.js";
-import FacebookAccount from "../models/FacebookAccount.js"; // Assuming you have this
+import FacebookAccount from "../models/FacebookAccount.js"; 
 import WhatsAppAccount from "../models/WhatsAppAccount.js";
-
 
 // 1. Get User's Startup Data
 export const getStartupData = async (req, res) => {
@@ -19,18 +18,25 @@ export const getStartupData = async (req, res) => {
 export const saveStartupData = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
-    const { businessName, description, faq, tone } = req.body;
+    // 🔥 Naye fields ko destructured body se nikal liya hai
+    const { businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone } = req.body;
 
     let startupData = await StartupData.findOne({ userId });
     
     if (startupData) {
       startupData.businessName = businessName;
+      startupData.industry = industry;
+      startupData.websiteUrl = websiteUrl;
+      startupData.contactEmail = contactEmail;
+      startupData.contactPhone = contactPhone;
       startupData.description = description;
       startupData.faq = faq;
       startupData.tone = tone;
       startupData.updatedAt = Date.now();
     } else {
-      startupData = new StartupData({ userId, businessName, description, faq, tone });
+      startupData = new StartupData({ 
+        userId, businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone 
+      });
     }
     
     await startupData.save();
@@ -48,24 +54,23 @@ export const toggleAIStatus = async (req, res) => {
 
     let updatedAccount;
 
-    // Update 'ai_enabled' flag in the respective platform's table
     if (platform === 'instagram') {
       updatedAccount = await InstagramAccount.findOneAndUpdate(
         { instagram_user_id: accountId, userId },
         { ai_enabled: isEnabled },
-        { new: true }
+        { returnDocument: 'after' } // Updated for Mongoose compatibility
       );
     } else if (platform === 'facebook') {
       updatedAccount = await FacebookAccount.findOneAndUpdate(
         { page_id: accountId, userId },
         { ai_enabled: isEnabled },
-        { new: true }
+        { returnDocument: 'after' }
       );
     } else if (platform === 'whatsapp') {
       updatedAccount = await WhatsAppAccount.findOneAndUpdate(
         { phone_number_id: accountId, userId },
         { ai_enabled: isEnabled },
-        { new: true }
+        { returnDocument: 'after' }
       );
     }
 
@@ -77,41 +82,38 @@ export const toggleAIStatus = async (req, res) => {
   }
 };
 
-
 export const setupAIAutoReply = async (req, res) => {
   try {
-    // Assuming you have auth middleware that sets req.user
     const userId = req.user.id || req.user._id; 
-    const { accountId, businessName, description, faq, tone } = req.body;
+    // 🔥 Naye fields add kiye
+    const { accountId, businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone } = req.body;
 
     if (!accountId || !businessName) {
       return res.status(400).json({ error: "Account ID and Business Name are required." });
     }
 
-    // 1. Find or Create Startup Data for this user
     let startupData = await StartupData.findOne({ userId });
     
     if (!startupData) {
       startupData = new StartupData({
-        userId,
-        businessName,
-        description,
-        faq,
-        tone
+        userId, businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone
       });
     } else {
       startupData.businessName = businessName;
+      startupData.industry = industry;
+      startupData.websiteUrl = websiteUrl;
+      startupData.contactEmail = contactEmail;
+      startupData.contactPhone = contactPhone;
       startupData.description = description;
       startupData.faq = faq;
       startupData.tone = tone;
     }
     await startupData.save();
 
-    // 2. Enable AI for the selected Instagram Account
     await InstagramAccount.findOneAndUpdate(
       { instagram_user_id: accountId, userId: userId },
       { ai_enabled: true },
-      { new: true }
+      { returnDocument: 'after' }
     );
 
     res.status(200).json({ 

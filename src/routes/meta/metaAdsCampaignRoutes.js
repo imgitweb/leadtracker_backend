@@ -1,4 +1,5 @@
 import express from "express";
+import multer from "multer";
 import {
   createFullCampaign,
   getLinkedPages,
@@ -24,33 +25,28 @@ import {
 
 const router = express.Router();
 
-// ==========================================
-// CAMPAIGN ROUTES
-// ==========================================
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 500 * 1024 * 1024 },
+});
+
 router.get("/", protect, getAllCampaigns);
 router.get("/sync", protect, syncWithMeta);
 router.get("/pages", protect, getLinkedPages);
-router.post("/create", protect, createFullCampaign);
-router.get("/posts/:pageId", protect, getPagePosts);
-router.post("/status", protect, updateCampaignStatus); // PAUSE, ACTIVE, ARCHIVED
-router.post("/modify", protect, modifyCampaign); // Changing budget/objective
-router.delete("/:campaignId", protect, deleteCampaign); // Delete Campaign
+router.post("/create", protect, upload.single("media"), createFullCampaign);
 
-// ==========================================
-// AD-SETS ROUTES
-// ==========================================
+router.get("/posts/:pageId", protect, getPagePosts);
+router.post("/status", protect, updateCampaignStatus);
+router.post("/modify", protect, modifyCampaign);
+router.delete("/:campaignId", protect, deleteCampaign);
 router.get("/ad-sets", protect, getCampaignAdSets);
 router.post("/ad-sets/create", protect, createAdSet);
-router.post("/ad-sets/status", protect, updateAdSetStatus); // PAUSE, ACTIVE, ARCHIVED
-router.delete("/ad-sets/:adSetId", protect, deleteAdSet); // Delete Ad Set
-
-// ==========================================
-// ADS ROUTES
-// ==========================================
+router.post("/ad-sets/status", protect, updateAdSetStatus); 
+router.delete("/ad-sets/:adSetId", protect, deleteAdSet); 
 router.get("/get-ads", protect, getAdSetAds);
 router.post("/ads/create", protect, createAd);
-router.post("/ads/status", protect, updateAdStatus); // PAUSE, ACTIVE, ARCHIVED
-router.delete("/ads/:adId", protect, deleteAd); // Delete Ad
+router.post("/ads/status", protect, updateAdStatus);
+router.delete("/ads/:adId", protect, deleteAd);
 router.get("/ads/insights", protect, getAdInsights);
 
 export default router;

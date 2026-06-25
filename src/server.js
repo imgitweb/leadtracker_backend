@@ -10,6 +10,7 @@ import path from "path";
 import { Server } from "socket.io";
 import http from "http";
 import { fileURLToPath } from "url";
+import WebSocket, { WebSocketServer } from "ws";
 
 // Load environment variables
 dotenv.config();
@@ -21,6 +22,7 @@ import connectDB from "./config/database.js";
 import { auditLog } from "./middleware/auditLog.js";
 import { errorHandler, notFound } from "./middleware/errorHandler.js";
 import { apiLimiter } from "./config/rateLimiter.js";
+import bulkMailRoutes from "./routes/bulkEmail.js";
 
 // Import routes
 import authRoutes from "./routes/auth.js";
@@ -32,7 +34,6 @@ import formRoutes from "./routes/forms.js";
 import analyticsRoutes from "./routes/analytics.js";
 import knowledgeRepositoryRoutes from "./routes/knowledgeRepository.js";
 import superAdminRoutes from "./superadmin/routes/superAdminRoutes.js";
-import bulkEmailRoutes from "./routes/bulkEmail.js";
 import { CompanyModuleService } from "./services/CompanyModuleService.js";
 import { BulkEmailService } from "./services/BulkEmailService.js";
 import aiRoutes from "./routes/aiRoutes.js";
@@ -55,6 +56,13 @@ import metaAdsAuthRoutes from "./routes/meta/metaAdsAuthRoutes.js";
 import metaCampaignsRoutes from "./routes/meta/metaAdsCampaignRoutes.js";
 
 import webhookRoutes from "./routes/meta/webhookRoutes.js";
+
+
+import agentRoutes from "./routes/agentRoutes.js";
+import campaignRoutes from "./routes/campaignRoutes.js";
+import "./services/campaignWorker.js";
+
+import { handleTwilioStream } from "./controllers/streamController.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -91,7 +99,6 @@ startCronJobs();
 
 // ============ MIDDLEWARE ============
 
-// Security middleware
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
@@ -111,19 +118,12 @@ app.use(
   }),
 );
 
-// Request logging
 app.use(morgan("combined"));
-
-// Body parser
-// Static files for uploads
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
-
-// Cookie parser
 app.use(cookieParser(process.env.SESSION_SECRET));
 
-// Session middleware
 app.use(
   session({
     secret: process.env.SESSION_SECRET,
@@ -131,21 +131,17 @@ app.use(
     saveUninitialized: false,
     store: mongoStore.create({
       mongoUrl: process.env.MONGO_URI,
-      touchAfter: 24 * 3600, // lazy session update
+      touchAfter: 24 * 3600,
     }),
     cookie: {
       secure: process.env.NODE_ENV === "production",
       httpOnly: true,
       sameSite: "strict",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      maxAge: 24 * 60 * 60 * 1000,
     },
   }),
 );
 
-// Rate limiting
-// app.use('/api/', apiLimiter);
-
-// Audit logging
 app.use(auditLog);
 
 // ============ ROUTES ============
@@ -158,17 +154,16 @@ app.get("/health", (req, res) => {
   });
 });
 
-// API routes
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/company", companyRoutes);
-app.use("/api/lead", leadRoutes);
-app.use("/api/contact", contactRoutes);
-app.use("/api/forms", formRoutes);
-app.use("/api/analytics", analyticsRoutes);
-app.use("/api/knowledge-repository", knowledgeRepositoryRoutes);
-app.use("/api/superadmin", superAdminRoutes);
-app.use("/api/bulk-email", bulkEmailRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/company', companyRoutes);
+app.use('/api/lead', leadRoutes);
+app.use('/api/contact', contactRoutes);
+app.use('/api/forms', formRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/knowledge-repository', knowledgeRepositoryRoutes);
+app.use('/api/superadmin', superAdminRoutes);
+
 
 app.use("/api/ai", aiRoutes);
 app.use("/api/chat", chatRoutes);
@@ -188,8 +183,13 @@ app.use("/api/webhook/whatsapp", whatsappWebhookRoutes);
 
 app.use("/api/meta-ads", metaAdsAuthRoutes);
 app.use("/api/meta-campaigns", metaCampaignsRoutes);
+app.use("/api/bulk-email", bulkMailRoutes);
 
-// Error handling
+// ── AI Calling Agent Routes ───────────────────────────────────────
+app.use("/api/agent", agentRoutes);
+app.use("/api/campaigns", campaignRoutes);
+// ─────────────────────────────────────────────────────────────────
+
 app.use(notFound);
 app.use(errorHandler);
 
@@ -200,6 +200,22 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log(`🔴 Client Disconnected: ${socket.id}`);
   });
+});
+
+// ============ WEBSOCKET — TWILIO MEDIA STREAM ============
+const wss = new WebSocketServer({ server, path: "/media-stream" });
+
+wss.on("connection", (ws, req) => {
+  console.log("✅ Twilio WebSocket connected at:", req.url);
+  handleTwilioStream(ws);
+});
+
+wss.on("error", (error) => {
+  console.error("❌ WebSocket Server Error:", error.message);
+});
+
+server.on("upgrade", (req) => {
+  console.log("🔁 Upgrade request received:", req.url);
 });
 
 // ============ START SERVER ============

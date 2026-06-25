@@ -1,28 +1,25 @@
 import axios from "axios";
 import mongoose from "mongoose";
+import FormData from "form-data";
 import MetaAdAccount from "../../models/MetaAdAccount.js";
 import MetaAdSet from "../../models/metaAdsetsModel.js";
 import MetaAd from "../../models/metaAds.js";
+import FacebookAccount from "../../models/FacebookAccount.js"; // Required for Lead Forms page token
 
 const META_API = `https://graph.facebook.com/v25.0`;
 
+// ==========================================
+// FETCH AD SETS FOR A CAMPAIGN
+// ==========================================
 export const getCampaignAdSets = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { campaignId } = req.query;
-    const { adAccountId } = req.query;
+    const { campaignId, adAccountId } = req.query;
 
-    if (!campaignId) {
+    if (!campaignId || !adAccountId) {
       return res.status(400).json({
         success: false,
-        message: "campaignId is required",
-      });
-    }
-
-    if (!adAccountId) {
-      return res.status(400).json({
-        success: false,
-        message: "adAccountId is required",
+        message: "campaignId and adAccountId are required",
       });
     }
 
@@ -40,8 +37,7 @@ export const getCampaignAdSets = async (req, res) => {
 
     const response = await axios.get(`${META_API}/${campaignId}/adsets`, {
       params: {
-        fields:
-          "id,name,status,campaign_id,daily_budget,lifetime_budget,billing_event,optimization_goal,targeting,created_time,start_time,end_time",
+        fields: "id,name,status,campaign_id,daily_budget,lifetime_budget,billing_event,optimization_goal,targeting,created_time,start_time,end_time",
         access_token: metaAdAccount.userAccessToken,
       },
     });
@@ -52,9 +48,7 @@ export const getCampaignAdSets = async (req, res) => {
       await MetaAdSet.bulkWrite(
         adSets.map((adSet) => ({
           updateOne: {
-            filter: {
-              adSetId: adSet.id,
-            },
+            filter: { adSetId: adSet.id },
             update: {
               $set: {
                 userId,
@@ -92,7 +86,6 @@ export const getCampaignAdSets = async (req, res) => {
     });
   } catch (error) {
     console.error("Get ad sets error:", error.response?.data || error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch ad sets",
@@ -101,23 +94,18 @@ export const getCampaignAdSets = async (req, res) => {
   }
 };
 
+// ==========================================
+// FETCH ADS FOR AN AD SET
+// ==========================================
 export const getAdSetAds = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { adSetId } = req.query;
-    const { adAccountId } = req.query;
+    const { adSetId, adAccountId } = req.query;
 
-    if (!adSetId) {
+    if (!adSetId || !adAccountId) {
       return res.status(400).json({
         success: false,
-        message: "adSetId is required",
-      });
-    }
-
-    if (!adAccountId) {
-      return res.status(400).json({
-        success: false,
-        message: "adAccountId is required",
+        message: "adSetId and adAccountId are required",
       });
     }
 
@@ -135,8 +123,7 @@ export const getAdSetAds = async (req, res) => {
 
     const response = await axios.get(`${META_API}/${adSetId}/ads`, {
       params: {
-        fields:
-          "id,name,status,effective_status,adset_id,campaign_id,tracking_specs,creative{id,name,status,thumbnail_url,asset_feed_spec,body,actor_id}",
+        fields: "id,name,status,effective_status,adset_id,campaign_id,tracking_specs,creative{id,name,status,thumbnail_url,asset_feed_spec,body,actor_id}",
         access_token: metaAdAccount.userAccessToken,
         limit: 500,
       },
@@ -148,10 +135,7 @@ export const getAdSetAds = async (req, res) => {
       await MetaAd.bulkWrite(
         ads.map((ad) => ({
           updateOne: {
-            filter: {
-              userId,
-              adId: ad.id,
-            },
+            filter: { userId, adId: ad.id },
             update: {
               $set: {
                 userId,
@@ -162,7 +146,6 @@ export const getAdSetAds = async (req, res) => {
                 adName: ad.name,
                 status: ad.status,
                 effectiveStatus: ad.effective_status,
-
                 creative: {
                   creativeId: ad.creative?.id,
                   name: ad.creative?.name,
@@ -172,9 +155,7 @@ export const getAdSetAds = async (req, res) => {
                   body: ad.creative?.body,
                   assetFeedSpec: ad.creative?.asset_feed_spec || {},
                 },
-
                 trackingSpecs: ad.tracking_specs || [],
-
                 metaData: ad,
               },
             },
@@ -184,10 +165,7 @@ export const getAdSetAds = async (req, res) => {
       );
     }
 
-    const savedAds = await MetaAd.find({
-      userId,
-      adSetId,
-    })
+    const savedAds = await MetaAd.find({ userId, adSetId })
       .select("-metaData -__v")
       .lean();
 
@@ -198,7 +176,6 @@ export const getAdSetAds = async (req, res) => {
     });
   } catch (error) {
     console.error("Get ads error:", error.response?.data || error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch ads",
@@ -207,75 +184,98 @@ export const getAdSetAds = async (req, res) => {
   }
 };
 
-
-
-
-
-
-
 // ==========================================
 // CREATE AD SET INSIDE EXISTING CAMPAIGN
 // ==========================================
 export const createAdSet = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const userId = req.user._id.toString();
+
+    // Support both FormData (JSON.parse) or raw JSON from frontend
+    if (!req.body.data && Object.keys(req.body).length === 0) {
+      return res.status(400).json({ error: "No ad set data provided." });
+    }
+    const formData = req.body.data ? JSON.parse(req.body.data) : req.body;
+
     const {
       adAccountId,
       campaignId,
-      adSetName,
+      campaignObjective, 
+      budgetStrategy,
+      budgetType,
       dailyBudget,
-      targetLocation,
-      targetGender,
+      bidStrategy,
+      bidAmount,
+      adSetName,
+      adSetStartDate,
+      selectedLocations,
       minAge,
       maxAge,
-      advantage_audience,
-    } = req.body;
+    } = formData;
 
-    if (!adAccountId || !campaignId || !adSetName || !dailyBudget) {
+    if (!adAccountId || !campaignId || !adSetName) {
       return res.status(400).json({ error: "Missing required fields." });
     }
 
-    // 1. Get Access Token
-    const accountRecord = await MetaAdAccount.findOne({ userId, adAccountId });
+    const actId = adAccountId.startsWith("act_") ? adAccountId : `act_${adAccountId}`;
+
+    const accountRecord = await MetaAdAccount.findOne({ userId: req.user._id, adAccountId });
     if (!accountRecord || !accountRecord.userAccessToken) {
-      return res.status(404).json({
-        error: "Access Token not found. Please sync your account again.",
-      });
+      return res.status(404).json({ error: "Access Token not found." });
     }
     const token = accountRecord.userAccessToken;
 
-    // 2. Format Meta Targeting Rules
-    let genderTargeting = [1, 2]; // Default to ALL
-    if (targetGender === "male") genderTargeting = [1];
-    if (targetGender === "female") genderTargeting = [2];
+    const finalObjective = campaignObjective || "OUTCOME_TRAFFIC";
+    let optimizationGoal = "LINK_CLICKS"; 
+    if (finalObjective === "OUTCOME_AWARENESS") optimizationGoal = "REACH";
+    if (finalObjective === "OUTCOME_ENGAGEMENT") optimizationGoal = "POST_ENGAGEMENT";
+    if (finalObjective === "OUTCOME_LEADS") optimizationGoal = "LEAD_GENERATION";
 
-    const isAdvantage = advantage_audience ? 1 : 0;
+    const countries = selectedLocations && selectedLocations.length > 0
+      ? selectedLocations.filter(loc => loc.type === "country").map(loc => loc.id || "IN")
+      : ["IN"];
 
-    const targetingSpec = {
-      geo_locations: { countries: [targetLocation || "IN"] },
+    const targetingPayload = {
+      geo_locations: { countries: countries.length > 0 ? countries : ["IN"] },
       age_min: minAge || 18,
       age_max: maxAge || 65,
-      genders: genderTargeting,
-      targeting_automation: {
-        advantage_audience: isAdvantage,
-      },
+      targeting_automation: { advantage_audience: 1 }
     };
 
-    // 3. Create Ad Set on Meta
-    const adSetRes = await axios.post(`${META_API}/${adAccountId}/adsets`, {
+    const adSetPayload = {
       name: adSetName,
       campaign_id: campaignId,
-      daily_budget: dailyBudget * 100, // INR to Paise
       billing_event: "IMPRESSIONS",
-      optimization_goal: "LINK_CLICKS",
-      targeting: targetingSpec,
+      optimization_goal: optimizationGoal,
+      targeting: targetingPayload,
       status: "PAUSED",
       access_token: token,
-    });
+      start_time: adSetStartDate ? new Date(adSetStartDate).toISOString() : new Date().toISOString()
+    };
 
+    // 🔥 FIX: Apply budget only if strategy is Ad Set Level
+    if (budgetStrategy === "ad_set_budget") {
+      if (budgetType === "daily_budget") {
+        adSetPayload.daily_budget = dailyBudget * 100;
+      } else {
+        adSetPayload.lifetime_budget = dailyBudget * 100;
+      }
+      adSetPayload.bid_strategy = bidStrategy || "LOWEST_COST_WITHOUT_CAP";
+
+      const cappedStrategies = ["LOWEST_COST_WITH_BID_CAP", "COST_CAP", "BID_CAP"];
+      if (cappedStrategies.includes(bidStrategy)) {
+        if (bidAmount) {
+          adSetPayload.bid_amount = bidAmount * 100; 
+        } else {
+          return res.status(400).json({ error: `Meta API Error: 'bidAmount' is required when using ${bidStrategy} strategy.` });
+        }
+      }
+    }
+
+    const adSetRes = await axios.post(`${META_API}/${actId}/adsets`, adSetPayload);
     const newAdSetId = adSetRes.data.id;
 
-    // 4. Save the newly created Ad Set to Database (FIXED Mongoose Validation)
+    // Save to Database
     const newAdSet = new MetaAdSet({
       userId,
       adAccountId,
@@ -283,12 +283,12 @@ export const createAdSet = async (req, res) => {
       adSetId: newAdSetId,
       adSetName,
       status: "PAUSED",
-      dailyBudget: dailyBudget,
-      lifetimeBudget: 0,      // Fix: Added required field
-      budget_remaining: 0,    // Fix: Added required field
+      dailyBudget: budgetStrategy === "ad_set_budget" ? dailyBudget : 0,
+      lifetimeBudget: 0,      
+      budget_remaining: 0,    
       billingEvent: "IMPRESSIONS",
-      optimizationGoal: "LINK_CLICKS",
-      targeting: targetingSpec,
+      optimizationGoal,
+      targeting: targetingPayload,
       createdTime: new Date().toISOString(),
     });
 
@@ -300,139 +300,219 @@ export const createAdSet = async (req, res) => {
       data: newAdSet,
     });
   } catch (error) {
-    console.error("Create Ad Set Error:", error.response?.data || error.message);
-    
-    const metaMsg = 
-      error.response?.data?.error?.error_user_msg || 
-      error.response?.data?.error?.message || 
-      "Unknown Meta Error";
-      
-    return res.status(500).json({ error: `Meta API Error: ${metaMsg}` });
-  }
-};
-
-
-
-// ==========================================
-// NEW: CREATE SINGLE AD INSIDE EXISTING AD SET
-// ==========================================
-export const createAd = async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const {
-      adAccountId,
-      adSetId,
-      adName,
-      pageId,
-      isExistingPost,
-      existingPostId,
-      adText,
-      imageUrl,
-      websiteUrl,
-    } = req.body;
-
-    if (!adAccountId || !adSetId || !adName || !pageId) {
-      return res.status(400).json({ error: "Missing required fields." });
-    }
-
-    // 1. Get Access Token
-    const accountRecord = await MetaAdAccount.findOne({ userId, adAccountId });
-    if (!accountRecord || !accountRecord.userAccessToken) {
-      return res.status(404).json({ error: "Access Token not found." });
-    }
-    const token = accountRecord.userAccessToken;
-
-    // 2. Prepare Creative Payload
-    let creativePayload = {
-      name: `${adName} - Creative`,
-      access_token: token,
-    };
-
-    if (isExistingPost) {
-      if (!existingPostId) return res.status(400).json({ error: "Missing existing post ID" });
-      creativePayload.object_story_id = existingPostId;
-    } else {
-      if (!websiteUrl || !imageUrl) return res.status(400).json({ error: "Missing image or website URL" });
-      creativePayload.object_story_spec = {
-        page_id: pageId,
-        link_data: {
-          link: websiteUrl,
-          message: adText,
-          picture: imageUrl,
-          call_to_action: { type: "LEARN_MORE" },
-        },
-      };
-    }
-
-    // 3. Create Ad Creative on Meta
-    const creativeRes = await axios.post(`${META_API}/${adAccountId}/adcreatives`, creativePayload);
-    const creativeId = creativeRes.data.id;
-
-    // 4. Create Actual Ad on Meta linking to the AdSet
-    const adRes = await axios.post(`${META_API}/${adAccountId}/ads`, {
-      name: adName,
-      adset_id: adSetId,
-      creative: { creative_id: creativeId },
-      status: "PAUSED", // Default to paused
-      access_token: token,
-    });
-
-    const newAdId = adRes.data.id;
-
-    // 5. Fetch Ad Data back to save properly in DB
-    const fetchedAdRes = await axios.get(`${META_API}/${newAdId}`, {
-      params: {
-        fields: "id,name,status,effective_status,adset_id,campaign_id,tracking_specs,creative{id,name,status,thumbnail_url,asset_feed_spec,body,actor_id}",
-        access_token: token
-      }
-    });
-    
-    const adData = fetchedAdRes.data;
-
-    // 6. Save Ad to Database
-    const newAd = new MetaAd({
-      userId,
-      adAccountId,
-      campaignId: adData.campaign_id || "", 
-      adSetId,
-      adId: newAdId,
-      adName: adData.name,
-      status: adData.status,
-      effectiveStatus: adData.effective_status,
-      creative: {
-        creativeId: adData.creative?.id,
-        name: adData.creative?.name,
-        status: adData.creative?.status,
-        thumbnailUrl: adData.creative?.thumbnail_url,
-        actorId: adData.creative?.actor_id,
-        body: adData.creative?.body,
-        assetFeedSpec: adData.creative?.asset_feed_spec || {},
-      },
-      trackingSpecs: adData.tracking_specs || [],
-      metaData: adData
-    });
-
-    await newAd.save();
-
-    return res.status(201).json({ 
-      success: true, 
-      message: "Ad created successfully!", 
-      data: newAd 
-    });
-
-  } catch (error) {
-    console.error("Create Ad Error:", error.response?.data || error.message);
+    console.error("Meta API AdSet Creation Error:", error.response?.data || error.message);
     const metaMsg = error.response?.data?.error?.error_user_msg || error.response?.data?.error?.message || "Unknown Meta Error";
     return res.status(500).json({ error: `Meta API Error: ${metaMsg}` });
   }
 };
 
+// ==========================================
+// CREATE SINGLE AD INSIDE EXISTING AD SET
+// ==========================================
+export const createAd = async (req, res) => {
+  try {
+    const userId = req.user._id.toString();
 
+    if (!req.body.data) {
+      return res.status(400).json({ error: "No ad data provided." });
+    }
+    const formData = JSON.parse(req.body.data);
+
+    const {
+      adAccountId,
+      adSetId,
+      campaignId,
+      campaignObjective,
+      pageId,
+      websiteUrl,
+      adText,
+      headline,
+      callToAction,
+      imageUrl,
+      isExistingPost,
+      existingPostId,
+      adName,
+      leadForm 
+    } = formData;
+
+    const actId = adAccountId.startsWith("act_") ? adAccountId : `act_${adAccountId}`;
+
+    const accountRecord = await MetaAdAccount.findOne({ userId: req.user._id, adAccountId });
+    if (!accountRecord || !accountRecord.userAccessToken) {
+      return res.status(404).json({ error: "Access Token not found." });
+    }
+    const token = accountRecord.userAccessToken;
+
+    // --- CREATE LEAD GENERATION FORM ---
+    let leadFormId = null;
+    if (campaignObjective === "OUTCOME_LEADS" && leadForm && !isExistingPost) {
+      const pageRecord = await FacebookAccount.findOne({ page_id: pageId, userId });
+      if (!pageRecord || !pageRecord.access_token) {
+         return res.status(400).json({ error: "Page Access Token is missing." });
+      }
+
+      const pageToken = pageRecord.access_token;
+      let questionsPayload = [];
+
+      if (leadForm.questions?.customQuestions) {
+        leadForm.questions.customQuestions.forEach(q => {
+          let qObj = { type: "CUSTOM", label: q.question };
+          if (q.type === 'MULTIPLE_CHOICE' && q.options) {
+            qObj.options = q.options.filter(o => o.trim()).map(opt => ({ value: opt }));
+          }
+          questionsPayload.push(qObj);
+        });
+      }
+
+      if (leadForm.questions?.prefill) {
+        leadForm.questions.prefill.forEach(prefillType => {
+          questionsPayload.push({ type: String(prefillType).toUpperCase() });
+        });
+      }
+
+      if (questionsPayload.length === 0) questionsPayload.push({ type: "FULL_NAME" }, { type: "EMAIL" });
+
+      const formPayload = {
+        name: leadForm.name || "Lead Generation Form",
+        form_type: leadForm.form_type || "MORE_VOLUME", 
+        access_token: pageToken,
+        privacy_policy: JSON.stringify({
+          url: leadForm.privacyPolicy.url,
+          link_text: leadForm.privacyPolicy.linkText || "Privacy Policy"
+        }),
+        questions: JSON.stringify(questionsPayload),
+      };
+
+      if (leadForm.questions?.message) formPayload.question_page_custom_headline = leadForm.questions.message;
+
+      if (leadForm.intro?.useGreeting) {
+        formPayload.context_card = JSON.stringify({
+          style: "PARAGRAPH_STYLE",
+          title: leadForm.intro.headline || "Welcome",
+          content: [leadForm.intro.description || "Please provide your details below."],
+          button_text: "Next" 
+        }); 
+      }
+
+      if (leadForm.ending) {
+        formPayload.thank_you_page = JSON.stringify({
+          title: leadForm.ending.headline || "Thanks.",
+          body: leadForm.ending.description || "Exit the form now.",
+          button_type: "VIEW_WEBSITE",
+          button_text: leadForm.ending.buttonText || "View website",
+          website_url: leadForm.ending.websiteUrl || websiteUrl || "https://facebook.com"
+        });
+      }
+
+      const formRes = await axios.post(`${META_API}/${pageId}/leadgen_forms`, formPayload);
+      leadFormId = formRes.data.id;
+    }
+
+    // --- MEDIA UPLOAD (MULTER SUPPORTED) ---
+    let metaImageHash = null;
+    let metaVideoId = null;
+
+    if (!isExistingPost && req.file) {
+      const isVideo = req.file.mimetype.startsWith("video/");
+
+      if (isVideo) {
+        const form = new FormData();
+        form.append("access_token", token);
+        form.append("source", req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
+        const videoRes = await axios.post(`${META_API}/${actId}/advideos`, form, { headers: form.getHeaders() });
+        metaVideoId = videoRes.data.id;
+      } else {
+        const base64Image = req.file.buffer.toString("base64");
+        const imageRes = await axios.post(`${META_API}/${actId}/adimages`, { bytes: base64Image, access_token: token });
+        const imageKeys = Object.keys(imageRes.data.images);
+        metaImageHash = imageRes.data.images[imageKeys[0]].hash;
+      }
+    }
+
+    // --- CREATE AD CREATIVE ---
+    let creativeId = null;
+
+    if (isExistingPost && existingPostId) {
+      const creativeRes = await axios.post(`${META_API}/${actId}/adcreatives`, {
+        name: adName || `Creative - ${new Date().getTime()}`,
+        object_story_id: `${pageId}_${existingPostId}`,
+        access_token: token,
+      });
+      creativeId = creativeRes.data.id;
+    } else {
+      let object_story_spec = { page_id: pageId };
+      const targetLink = leadFormId ? "http://fb.me/" : websiteUrl;
+
+      if (metaVideoId) {
+        object_story_spec.video_data = {
+          video_id: metaVideoId,
+          call_to_action: { type: callToAction || "LEARN_MORE", value: { link: targetLink } },
+          message: adText,
+          title: headline
+        };
+        if (leadFormId) object_story_spec.video_data.call_to_action.value.lead_gen_form_id = leadFormId;
+      } else {
+        const pictureData = metaImageHash ? { image_hash: metaImageHash } : { picture: imageUrl };
+        object_story_spec.link_data = {
+          link: targetLink,
+          message: adText,
+          name: headline,
+          call_to_action: { type: callToAction || "LEARN_MORE", value: { link: targetLink } },
+          ...pictureData
+        };
+        if (leadFormId) object_story_spec.link_data.call_to_action.value.lead_gen_form_id = leadFormId;
+      }
+
+      const creativeRes = await axios.post(`${META_API}/${actId}/adcreatives`, {
+        name: adName || `Creative - ${new Date().getTime()}`,
+        object_story_spec: object_story_spec,
+        access_token: token,
+      });
+      creativeId = creativeRes.data.id;
+    }
+
+    // --- PUBLISH ACTUAL AD ---
+    const adRes = await axios.post(`${META_API}/${actId}/ads`, {
+      name: adName || `Final Ad - ${new Date().getTime()}`,
+      adset_id: adSetId,
+      creative: { creative_id: creativeId },
+      status: "PAUSED",
+      access_token: token,
+    });
+
+    const newAdId = adRes.data.id;
+
+    // Save to Database
+    const newAd = new MetaAd({
+      userId,
+      adAccountId,
+      campaignId: campaignId || "", 
+      adSetId,
+      adId: newAdId,
+      adName: adName,
+      status: "PAUSED",
+      effectiveStatus: "PAUSED",
+      creative: { creativeId: creativeId },
+    });
+
+    await newAd.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Ad Created Successfully!",
+      data: newAd,
+    });
+
+  } catch (error) {
+    console.error("Meta API Ad Creation Error:", error.response?.data || error.message);
+    const metaMsg = error.response?.data?.error?.error_user_msg || error.response?.data?.error?.message || "Unknown Meta Error";
+    return res.status(500).json({ error: `Meta API Error: ${metaMsg}` });
+  }
+};
 
 // ==========================================
 // AD SET ACTIONS: UPDATE STATUS & DELETE
 // ==========================================
-
 export const updateAdSetStatus = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -447,13 +527,11 @@ export const updateAdSetStatus = async (req, res) => {
       return res.status(404).json({ error: "Access Token not found." });
     }
 
-    // Hit Meta API
     await axios.post(`${META_API}/${adSetId}`, {
       status: status,
       access_token: accountRecord.userAccessToken,
     });
 
-    // Update MongoDB
     const updatedAdSet = await MetaAdSet.findOneAndUpdate(
       { adSetId: adSetId, userId: userId },
       { status: status },
@@ -483,12 +561,10 @@ export const deleteAdSet = async (req, res) => {
       return res.status(404).json({ error: "Access Token not found." });
     }
 
-    // Hit Meta API to Delete
     await axios.delete(`${META_API}/${adSetId}`, {
       data: { access_token: accountRecord.userAccessToken },
     });
 
-    // Delete from MongoDB
     await MetaAdSet.findOneAndDelete({ adSetId: adSetId, userId: userId });
 
     return res.status(200).json({ 
@@ -505,7 +581,6 @@ export const deleteAdSet = async (req, res) => {
 // ==========================================
 // AD ACTIONS: UPDATE STATUS & DELETE
 // ==========================================
-
 export const updateAdStatus = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -520,13 +595,11 @@ export const updateAdStatus = async (req, res) => {
       return res.status(404).json({ error: "Access Token not found." });
     }
 
-    // Hit Meta API
     await axios.post(`${META_API}/${adId}`, {
       status: status,
       access_token: accountRecord.userAccessToken,
     });
 
-    // Update MongoDB
     const updatedAd = await MetaAd.findOneAndUpdate(
       { adId: adId, userId: userId },
       { status: status, effectiveStatus: status },
@@ -556,12 +629,10 @@ export const deleteAd = async (req, res) => {
       return res.status(404).json({ error: "Access Token not found." });
     }
 
-    // Hit Meta API to Delete
     await axios.delete(`${META_API}/${adId}`, {
       data: { access_token: accountRecord.userAccessToken },
     });
 
-    // Delete from MongoDB
     await MetaAd.findOneAndDelete({ adId: adId, userId: userId });
 
     return res.status(200).json({ 
@@ -575,116 +646,14 @@ export const deleteAd = async (req, res) => {
   }
 };
 
-
-
 // ==========================================
-// Ad Insights: 
+// AD INSIGHTS (DAILY BREAKDOWN)
 // ==========================================
-
-// export const getAdInsights = async (req, res) => {
-//   try {
-//     const userId = req.user._id;
-//     const { adId, adAccountId, datePreset = "maximum" } = req.query;
-
-//     // 1. Validation
-//     if (!adId) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "adId is required",
-//       });
-//     }
-
-//     if (!adAccountId) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "adAccountId is required",
-//       });
-//     }
-
-//     // 2. Fetch User's Meta Access Token
-//     const metaAdAccount = await MetaAdAccount.findOne({
-//       userId: new mongoose.Types.ObjectId(userId),
-//       adAccountId,
-//     }).select("userAccessToken");
-
-//     if (!metaAdAccount) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Meta Ad Account not found",
-//       });
-//     }
-
-//     // 3. Call Meta Insights API
-//     // const response = await axios.get(`${META_API}/${adId}/insights`, {
-//     //   params: {
-//     //     fields: "ad_id,ad_name,impressions,clicks,spend,ctr,cpc,actions,reach",
-//     //     date_preset: datePreset, // frontend can pass 'last_30d', 'last_7d', defaults to 'maximum'
-//     //     access_token: metaAdAccount.userAccessToken,
-//     //   },
-//     // });
-
-
-
-//     // ... backend controller mein Meta API call ke params mein change karein ...
-// const response = await axios.get(`${META_API}/${adId}/insights`, {
-//   params: {
-//     fields: "ad_id,impressions,clicks,spend,ctr",
-//     date_preset: datePreset,
-//     // ================= ADD THIS LINE =================
-//     time_increment: 1, // '1' ka matlab daily break-down data milega
-//     // =================================================
-//     access_token: metaAdAccount.userAccessToken,
-//   },
-// });
-
-// // Response ab ek array milega jisme har din ka object hoga
-// const insights = response.data?.data || [];
-
-// return res.status(200).json({
-//   success: true,
-//   data: insights, // Ab ye full array frontend ko jaayega
-// });
-
-//    // const insights = response.data?.data || [];
-
-//     // 4. Handle Empty Data (If ad has 0 delivery so far)
-//     let metrics = {
-//       ad_id: adId,
-//       impressions: "0",
-//       clicks: "0",
-//       spend: "0",
-//       ctr: "0",
-//       cpc: "0",
-//       reach: "0",
-//       actions: []
-//     };
-
-//     if (insights.length > 0) {
-//       metrics = insights[0]; // Take the first object from the array
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       data: metrics,
-//     });
-
-//   } catch (error) {
-//     console.error("Get ad insights error:", error.response?.data || error.message);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch ad insights",
-//       error: error.response?.data?.error?.message || error.message,
-//     });
-//   }
-// };
-
 export const getAdInsights = async (req, res) => {
   try {
     const userId = req.user._id;
     const { adId, adAccountId, datePreset = "maximum" } = req.query;
 
-    // 1. Validation
     if (!adId || !adAccountId) {
       return res.status(400).json({
         success: false,
@@ -692,7 +661,6 @@ export const getAdInsights = async (req, res) => {
       });
     }
 
-    // 2. Fetch User's Meta Access Token
     const metaAdAccount = await MetaAdAccount.findOne({
       userId: new mongoose.Types.ObjectId(userId),
       adAccountId,
@@ -705,20 +673,17 @@ export const getAdInsights = async (req, res) => {
       });
     }
 
-    // 3. Call Meta Insights API
     const response = await axios.get(`${META_API}/${adId}/insights`, {
       params: {
         fields: "ad_id,impressions,clicks,spend,ctr",
         date_preset: datePreset,
-        time_increment: 1, // Get daily breakdown array
+        time_increment: 1, 
         access_token: metaAdAccount.userAccessToken,
       },
     });
 
-    // 4. Handle Response
     const insights = response.data?.data || [];
 
-    // If no delivery/data, send a clean empty array instead of failing
     if (insights.length === 0) {
       return res.status(200).json({
         success: true,
@@ -727,7 +692,6 @@ export const getAdInsights = async (req, res) => {
       });
     }
 
-    // Send the full array of daily insights to the frontend
     return res.status(200).json({
       success: true,
       data: insights, 
@@ -735,7 +699,6 @@ export const getAdInsights = async (req, res) => {
 
   } catch (error) {
     console.error("Get ad insights error:", error.response?.data || error.message);
-
     return res.status(500).json({
       success: false,
       message: "Failed to fetch ad insights",
