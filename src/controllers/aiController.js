@@ -15,11 +15,42 @@ export const getStartupData = async (req, res) => {
 };
 
 // 2. Save or Update Startup Data
+// export const saveStartupData = async (req, res) => {
+//   try {
+//     const userId = req.user._id || req.user.id;
+//     // 🔥 Naye fields ko destructured body se nikal liya hai
+//     const { businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone } = req.body;
+
+//     let startupData = await StartupData.findOne({ userId });
+    
+//     if (startupData) {
+//       startupData.businessName = businessName;
+//       startupData.industry = industry;
+//       startupData.websiteUrl = websiteUrl;
+//       startupData.contactEmail = contactEmail;
+//       startupData.contactPhone = contactPhone;
+//       startupData.description = description;
+//       startupData.faq = faq;
+//       startupData.tone = tone;
+//       startupData.updatedAt = Date.now();
+//     } else {
+//       startupData = new StartupData({ 
+//         userId, businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone 
+//       });
+//     }
+    
+//     await startupData.save();
+//     res.status(200).json({ success: true, startupData });
+//   } catch (error) {
+//     res.status(500).json({ error: "Failed to save startup data" });
+//   }
+// };
+
 export const saveStartupData = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
-    // 🔥 Naye fields ko destructured body se nikal liya hai
-    const { businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone } = req.body;
+    // 🔥 customPrompt ko req.body se nikal liya
+    const { businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone, customPrompt } = req.body;
 
     let startupData = await StartupData.findOne({ userId });
     
@@ -32,10 +63,11 @@ export const saveStartupData = async (req, res) => {
       startupData.description = description;
       startupData.faq = faq;
       startupData.tone = tone;
+      startupData.customPrompt = customPrompt; // 🔥 Update kiya
       startupData.updatedAt = Date.now();
     } else {
       startupData = new StartupData({ 
-        userId, businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone 
+        userId, businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone, customPrompt // 🔥 Add kiya
       });
     }
     
@@ -85,8 +117,20 @@ export const toggleAIStatus = async (req, res) => {
 export const setupAIAutoReply = async (req, res) => {
   try {
     const userId = req.user.id || req.user._id; 
-    // 🔥 Naye fields add kiye
-    const { accountId, businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone } = req.body;
+    
+    // 🔥 customPrompt ko req.body me add kar diya hai
+    const { 
+      accountId, 
+      businessName, 
+      industry, 
+      websiteUrl, 
+      contactEmail, 
+      contactPhone, 
+      description, 
+      faq, 
+      tone, 
+      customPrompt 
+    } = req.body;
 
     if (!accountId || !businessName) {
       return res.status(400).json({ error: "Account ID and Business Name are required." });
@@ -95,10 +139,21 @@ export const setupAIAutoReply = async (req, res) => {
     let startupData = await StartupData.findOne({ userId });
     
     if (!startupData) {
+      // Naya record banate waqt customPrompt save hoga
       startupData = new StartupData({
-        userId, businessName, industry, websiteUrl, contactEmail, contactPhone, description, faq, tone
+        userId, 
+        businessName, 
+        industry, 
+        websiteUrl, 
+        contactEmail, 
+        contactPhone, 
+        description, 
+        faq, 
+        tone,
+        customPrompt
       });
     } else {
+      // Purana record update karte waqt customPrompt update hoga
       startupData.businessName = businessName;
       startupData.industry = industry;
       startupData.websiteUrl = websiteUrl;
@@ -107,7 +162,9 @@ export const setupAIAutoReply = async (req, res) => {
       startupData.description = description;
       startupData.faq = faq;
       startupData.tone = tone;
+      startupData.customPrompt = customPrompt; 
     }
+    
     await startupData.save();
 
     await InstagramAccount.findOneAndUpdate(
