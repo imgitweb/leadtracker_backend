@@ -1,7 +1,27 @@
 import Campaign from "../models/Campaign.js";
-import Lead from "../models/CallingLead.js";
-// import { callQueue } from "../queues/callQueue.js";
+import CallingLead from "../models/CallingLead.js";
 
+// GET /campaigns
+const getCampaigns = async (req, res) => {
+  try {
+    const campaigns = await Campaign.find().sort({ createdAt: -1 });
+    res.json({ success: true, campaigns });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// GET /Campaigns/calling-lead
+const getCallingLeads = async (req, res) => {
+  try {
+    const leads = await CallingLead.find().sort({ createdAt: -1 });
+    res.json({ success: true, leads });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// POST /api/campaigns/create
 const createCampaign = async (req, res) => {
   try {
     const {
@@ -14,247 +34,106 @@ const createCampaign = async (req, res) => {
       callGapSeconds,
     } = req.body;
 
-    if (!campaignName || !prompt || !phoneNumbers?.length) {
+    if (!campaignName || !Array.isArray(phoneNumbers) || !phoneNumbers.length) {
       return res.status(400).json({
         success: false,
-        message: "Campaign name, prompt and phone numbers are required",
+        message: "campaignName aur phoneNumbers required hain",
       });
     }
+    if (!prompt) {
+      return res.status(400).json({ success: false, message: "prompt required hai" });
+    }
+
+    const uniqueNumbers = Array.from(
+      new Set(phoneNumbers.map((n) => String(n).trim()).filter(Boolean)),
+    );
 
     const campaign = await Campaign.create({
       campaignName,
       prompt,
-      voice: voice || "priyanka",
+      voice: voice || "keshavi",
       startTime: startTime || null,
       endTime: endTime || null,
-      callGapSeconds: Number(callGapSeconds) || 60,
-      totalLeads: phoneNumbers.length,
+      callGapSeconds: callGapSeconds || 60,
+      totalLeads: uniqueNumbers.length,
+      totalQueued: uniqueNumbers.length,
       status: "scheduled",
     });
 
-    const leadsPayload = phoneNumbers.map((phone, index) => ({
-      campaignId: campaign._id,
-      name: `Lead ${index + 1}`,
-      phone,
-      callStatus: "pending",
-      source: "AI Call Campaign",
-    }));
+    await CallingLead.insertMany(
+      uniqueNumbers.map((phone) => ({
+        campaignId: campaign._id,
+        phone,
+        prompt,
+        selectedVoice: voice || "keshavi",
+        callStatus: "queued",
+        source: "Bulk Campaign",
+      })),
+      { ordered: false },
+    );
 
-    await Lead.insertMany(leadsPayload);
-
-    return res.status(201).json({
+    res.json({
       success: true,
       message: "Campaign created successfully",
       campaign,
     });
   } catch (error) {
-    console.error("Create campaign error:", error.message);
-
-    return res.status(500).json({
-      success: false,
-      message: "Campaign create failed",
-      error: error.message,
-    });
+    console.error("createCampaign error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-const getCampaigns = async (req, res) => {
-  try {
-    const campaigns = await Campaign.find()
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const campaignsWithNumbers = await Promise.all(
-      campaigns.map(async (campaign) => {
-        const leads = await Lead.find({
-          campaignId: campaign._id,
-        })
-          .select("phone callStatus")
-          .lean();
-
-        return {
-          ...campaign,
-          voice: campaign.voice || "priyanka",
-          phoneNumbers: leads.map((lead) => ({
-            phone: lead.phone,
-            status: lead.callStatus,
-          })),
-        };
-      })
-    );
-
-    return res.json({
-      success: true,
-      campaigns: campaignsWithNumbers,
-    });
-  } catch (error) {
-    console.error("Get campaigns error:", error.message);
-
-    return res.status(500).json({
-      success: false,
-      message: "Campaigns fetch failed",
-      error: error.message,
-    });
-  }
-};
-
+// POST /api/campaigns/:id/start
+// Worker (campaignWorker.js) auto-picks up any campaign with status
+// "running" on its next tick — this endpoint just flips the flag.
 const startCampaign = async (req, res) => {
   try {
-    const { campaignId } = req.params;
-
-    const campaign = await Campaign.findById(campaignId);
+    const { id } = req.params;
+    const campaign = await Campaign.findById(id);
 
     if (!campaign) {
-      return res.status(404).json({
-        success: false,
-        message: "Campaign not found",
-      });
+      return res.status(404).json({ success: false, message: "Campaign not found" });
     }
 
-    const leads = await Lead.find({
-      campaignId,
-      callStatus: {
-        $in: ["pending", "failed"],
-      },
-    });
-
-    if (!leads.length) {
-      return res.status(400).json({
-        success: false,
-        message: "No pending leads found",
-      });
+    if (campaign.status === "running") {
+      return res.status(400).json({ success: false, message: "Campaign already running" });
     }
-
-    // Queue jobs
-    for (const lead of leads) {
-      if (typeof callQueue !== "undefined") {
-        await callQueue.add(
-          "call-lead",
-          {
-            leadId: lead._id.toString(),
-            campaignId: campaign._id.toString(),
-          },
-          {
-            jobId: `campaign-${campaign._id}-lead-${lead._id}`,
-          }
-        );
-      }
-
-      lead.callStatus = "queued";
-      await lead.save();
+    if (campaign.status === "completed") {
+      return res.status(400).json({ success: false, message: "Campaign already completed" });
     }
 
     campaign.status = "running";
+    campaign.startedAt = new Date();
     await campaign.save();
 
-    return res.json({
+    res.json({
       success: true,
-      message: `${leads.length} leads added to queue`,
-      totalQueued: leads.length,
+      message: "Campaign started successfully",
     });
   } catch (error) {
-    console.error("Start campaign error:", error.message);
-
-    return res.status(500).json({
-      success: false,
-      message: "Campaign start failed",
-      error: error.message,
-    });
+    console.error("startCampaign error:", error.message);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-const callStatusWebhook = async (req, res) => {
+// POST /api/campaigns/:id/pause
+const pauseCampaign = async (req, res) => {
   try {
-    const callSid = req.body.CallSid;
-    const callStatus = req.body.CallStatus;
-    const callDuration = req.body.CallDuration || 0;
-
-    const statusMap = {
-      initiated: "calling",
-      ringing: "calling",
-      "in-progress": "answered",
-      completed: "completed",
-      busy: "busy",
-      failed: "failed",
-      "no-answer": "no_answer",
-      canceled: "failed",
-    };
-
-    const updatedStatus =
-      statusMap[callStatus] || callStatus;
-
-    const lead = await Lead.findOneAndUpdate(
-      { callSid },
-      {
-        callStatus: updatedStatus,
-        callDuration: Number(callDuration) || 0,
-      },
-      {
-        new: true,
-      }
+    const { id } = req.params;
+    const campaign = await Campaign.findByIdAndUpdate(
+      id,
+      { status: "paused" },
+      { new: true },
     );
 
-    if (lead?.campaignId) {
-      const pendingLeads =
-        await Lead.countDocuments({
-          campaignId: lead.campaignId,
-          callStatus: {
-            $in: [
-              "pending",
-              "queued",
-              "calling",
-              "answered",
-            ],
-          },
-        });
-
-      if (pendingLeads === 0) {
-        await Campaign.findByIdAndUpdate(
-          lead.campaignId,
-          {
-            status: "completed",
-          }
-        );
-      }
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: "Campaign not found" });
     }
 
-    return res.status(200).send("OK");
+    res.json({ success: true, message: "Campaign paused", campaign });
   } catch (error) {
-    console.error(
-      "Call status webhook error:",
-      error.message
-    );
-
-    return res.status(500).send("ERROR");
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-const getCallingLeads = async (req, res) => {
-  try {
-    const leads = await Lead.find()
-      .sort({ createdAt: -1 })
-      .lean();
-
-    return res.status(200).json({
-      success: true,
-      count: leads.length,
-      leads,
-    });
-  } catch (error) {
-    console.error("Get calling leads error:", error.message);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch calling leads",
-      error: error.message,
-    });
-  }
-};
-
-export {
-  createCampaign,
-  getCampaigns,
-  startCampaign,
-  callStatusWebhook,
-  getCallingLeads,
-};
+export { getCampaigns, getCallingLeads, createCampaign, startCampaign, pauseCampaign };
