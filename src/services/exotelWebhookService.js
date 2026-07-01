@@ -2,14 +2,21 @@ import CallingLead from "../models/CallingLead.js";
 import Campaign from "../models/Campaign.js";
 
 class ExotelWebhookService {
-  async handleWebhook(body) {
+  async handleWebhook(payload) {
     try {
-      const call = body.Call || body;
+      console.log("========== EXOTEL WEBHOOK ==========");
+      console.log(JSON.stringify(payload, null, 2));
 
-      const sid = call.Sid;
+      // Exotel may send Call object or flat payload
+      const call = payload.Call || payload;
+
+      const sid =
+        call.Sid ||
+        call.CallSid ||
+        call.CallSidNumber;
 
       if (!sid) {
-        throw new Error("Missing Exotel Call SID");
+        throw new Error("Exotel Call SID missing.");
       }
 
       const lead = await CallingLead.findOne({
@@ -17,151 +24,235 @@ class ExotelWebhookService {
       });
 
       if (!lead) {
-        console.log("Lead not found:", sid);
-        return;
+        console.warn(`Lead not found for SID: ${sid}`);
+        return null;
       }
 
-      // ----------------------------
-      // Save Exotel Data
-      // ----------------------------
+      // -------------------------
+      // Update Lead
+      // -------------------------
 
       lead.callStatus = this.mapStatus(call.Status);
 
-      lead.callDuration = Number(call.Duration || 0);
+      lead.callDuration = Number(
+        call.Duration || 0
+      );
 
-      lead.callPrice = Number(call.Price || 0);
+      lead.callPrice = Number(
+        call.Price || 0
+      );
 
-      lead.answeredBy = call.AnsweredBy || "";
+      lead.answeredBy =
+        call.AnsweredBy || "";
 
       lead.callEndedAt = new Date();
 
-      if (call.RecordingUrl) {
+      if (
+        call.RecordingUrl ||
+        call.PreSignedRecordingUrl
+      ) {
         lead.recording = {
-          url: call.RecordingUrl,
-          presignedUrl: call.PreSignedRecordingUrl || "",
+          url: call.RecordingUrl || "",
+          presignedUrl:
+            call.PreSignedRecordingUrl || "",
         };
       }
 
       await lead.save();
 
-      await this.updateCampaignStats(lead.campaignId);
+      await this.updateCampaignStats(
+        lead.campaignId
+      );
 
       console.log(
-        `✅ Lead Updated (${lead.phone}) Status : ${lead.callStatus}`
+        `Lead ${lead.phone} updated -> ${lead.callStatus}`
       );
 
       return lead;
     } catch (error) {
       console.error(
-        "Exotel Webhook Error:",
-        error.message
+        "Exotel Webhook Error"
       );
+      console.error(error);
 
       throw error;
     }
   }
 
-  mapStatus(status) {
-    switch ((status || "").toLowerCase()) {
+  mapStatus(status = "") {
+    switch (status.toLowerCase()) {
       case "completed":
+      case "completed_successfully":
         return "completed";
 
       case "busy":
         return "busy";
 
       case "failed":
+      case "failed_error":
         return "failed";
 
       case "no-answer":
       case "no_answer":
+      case "no answer":
         return "no_answer";
 
+      case "ringing":
+      case "queued":
+      case "initiated":
       case "in-progress":
       case "inprogress":
-      case "ringing":
         return "calling";
 
       default:
-        return "completed";
+        return "unknown";
     }
   }
 
   async updateCampaignStats(campaignId) {
     if (!campaignId) return;
 
-    const [
-      totalLeads,
-      totalAnswered,
-      totalCompleted,
-      totalFailed,
-      totalBusy,
-      totalNoAnswer,
-      totalQualified,
-    ] = await Promise.all([
-      CallingLead.countDocuments({
-        campaignId,
-      }),
+    const stats = await CallingLead.aggregate([
+      {
+        $match: {
+          campaignId,
+        },
+      },
+      {
+        $group: {
+          _id: null,
 
-      CallingLead.countDocuments({
-        campaignId,
-        answeredBy: "human",
-      }),
+          totalLeads: {
+            $sum: 1,
+          },
 
-      CallingLead.countDocuments({
-        campaignId,
-        callStatus: "completed",
-      }),
+          totalAnswered: {
+            $sum: {
+              $cond: [
+                {
+                  $eq: [
+                    "$answeredBy",
+                    "human",
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
 
-      CallingLead.countDocuments({
-        campaignId,
-        callStatus: "failed",
-      }),
+          totalCompleted: {
+            $sum: {
+              $cond: [
+                {
+                  $eq: [
+                    "$callStatus",
+                    "completed",
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
 
-      CallingLead.countDocuments({
-        campaignId,
-        callStatus: "busy",
-      }),
+          totalFailed: {
+            $sum: {
+              $cond: [
+                {
+                  $eq: [
+                    "$callStatus",
+                    "failed",
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
 
-      CallingLead.countDocuments({
-        campaignId,
-        callStatus: "no_answer",
-      }),
+          totalBusy: {
+            $sum: {
+              $cond: [
+                {
+                  $eq: [
+                    "$callStatus",
+                    "busy",
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
 
-      CallingLead.countDocuments({
-        campaignId,
-        status: "qualified",
-      }),
+          totalNoAnswer: {
+            $sum: {
+              $cond: [
+                {
+                  $eq: [
+                    "$callStatus",
+                    "no_answer",
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+
+          totalQualified: {
+            $sum: {
+              $cond: [
+                {
+                  $eq: [
+                    "$status",
+                    "qualified",
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
     ]);
 
+    const result = stats[0] || {
+      totalLeads: 0,
+      totalAnswered: 0,
+      totalCompleted: 0,
+      totalFailed: 0,
+      totalBusy: 0,
+      totalNoAnswer: 0,
+      totalQualified: 0,
+    };
+
     const progress =
-      totalLeads === 0
+      result.totalLeads === 0
         ? 0
         : Math.round(
-            ((totalCompleted +
-              totalFailed +
-              totalBusy +
-              totalNoAnswer) /
-              totalLeads) *
-              100
+            ((result.totalCompleted +
+              result.totalFailed +
+              result.totalBusy +
+              result.totalNoAnswer) *
+              100) /
+              result.totalLeads
           );
 
-    await Campaign.findByIdAndUpdate(campaignId, {
-      totalLeads,
-      totalAnswered,
-      totalCompleted,
-      totalFailed,
-      totalBusy,
-      totalNoAnswer,
-      totalQualified,
-      progress,
+    await Campaign.findByIdAndUpdate(
+      campaignId,
+      {
+        ...result,
+        progress,
 
-      ...(progress === 100
-        ? {
-            status: "completed",
-            completedAt: new Date(),
-          }
-        : {}),
-    });
+        ...(progress === 100 && {
+          status: "completed",
+          completedAt: new Date(),
+        }),
+      }
+    );
   }
 }
 
