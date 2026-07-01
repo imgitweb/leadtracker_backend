@@ -58,11 +58,11 @@ import metaCampaignsRoutes from "./routes/meta/metaAdsCampaignRoutes.js";
 import webhookRoutes from "./routes/meta/webhookRoutes.js";
 
 
-import agentRoutes from "./routes/agentRoutes.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
 import "./services/campaignWorker.js";
+import exotelWebhookRoutes from "./routes/exotelWebhook.js";
 
-import { handleTwilioStream } from "./controllers/streamController.js";
+import { handleExotelStream } from "./controllers/streamController.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -186,8 +186,14 @@ app.use("/api/meta-campaigns", metaCampaignsRoutes);
 app.use("/api/bulk-email", bulkMailRoutes);
 
 // ── AI Calling Agent Routes ───────────────────────────────────────
-app.use("/api/agent", agentRoutes);
-app.use("/api/campaigns", campaignRoutes);
+// NOTE: mounted at root, NOT "/api/campaigns" — campaignRoutes.js
+// already defines its own full paths ("/campaigns", "/api/campaigns/create",
+// etc.) to match what the frontend (CallCampaign.jsx) calls directly.
+// Mounting it under "/api/campaigns" here would double-prefix every
+// route (e.g. "/api/campaigns/api/campaigns/create") and break the UI.
+app.use(campaignRoutes);
+
+app.use("/api/exotel/webhook", exotelWebhookRoutes);
 // ─────────────────────────────────────────────────────────────────
 
 app.use(notFound);
@@ -201,12 +207,12 @@ io.on("connection", (socket) => {
   });
 });
 
-// ============ WEBSOCKET — TWILIO MEDIA STREAM ============
+// ============ WEBSOCKET — EXOTEL VOICE STREAM ============
 const wss = new WebSocketServer({ server, path: "/media-stream" });
 
 wss.on("connection", (ws, req) => {
-  console.log("✅ Twilio WebSocket connected at:", req.url);
-  handleTwilioStream(ws);
+  console.log("✅ Exotel WebSocket connected at:", req.url);
+  handleExotelStream(ws);
 });
 
 wss.on("error", (error) => {

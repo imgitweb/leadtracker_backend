@@ -1,29 +1,20 @@
 import express from "express";
-
 import {
-  createCampaign,
   getCampaigns,
-  startCampaign,
-  callStatusWebhook,
   getCallingLeads,
+  createCampaign,
+  startCampaign,
+  pauseCampaign,
 } from "../controllers/campaignController.js";
-
 
 const router = express.Router();
 
-// Create Campaign
-router.post("/create", createCampaign);
 
-// Get All Campaigns
-router.get("/", getCampaigns);
+router.get("/api/campaigns", getCampaigns);
+router.get("/api/Campaigns/calling-lead", getCallingLeads);
 
-// Start Campaign
-router.post("/:campaignId/start", startCampaign);
-
-// Twilio Status Callback
-router.post("/call-status", callStatusWebhook);
-
-// Get Calling Leads
-router.get("/calling-lead", getCallingLeads);
+router.post("/api/campaigns/create", createCampaign);
+router.post("/api/campaigns/:id/start", startCampaign);
+router.post("/api/campaigns/:id/pause", pauseCampaign);
 
 export default router;

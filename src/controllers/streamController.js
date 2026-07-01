@@ -11,11 +11,11 @@ const aiClient = new OpenAI({
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
 
-const handleTwilioStream = (ws) => {
-  console.log("🟢 Twilio Live Call Connected");
+const handleExotelStream = (ws) => {
+  console.log("🟢 Exotel Voice Connected");
 
   let streamSid = null;
-  let callSid = null;
+  let exotelCallSid = null;
   let currentLead = null;
   let isClosed = false;
   let aiTimeout = null;
@@ -132,6 +132,7 @@ IMPORTANT:
         if (response.audio && streamSid && ws.readyState === WebSocket.OPEN) {
           isSpeaking = true;
 
+          // Exotel expects payload as base64 mulaw 8k chunks under "media"
           ws.send(
             JSON.stringify({
               event: "media",
@@ -198,7 +199,8 @@ IMPORTANT:
       if (isSpeaking && transcript.length > 3) {
         isSpeaking = false;
 
-        if (ws.readyState === WebSocket.OPEN) {
+        if (ws.readyState === WebSocket.OPEN && streamSid) {
+          // Barge-in: tell Exotel to clear buffered audio it hasn't played yet
           ws.send(
             JSON.stringify({
               event: "clear",
@@ -320,21 +322,41 @@ IMPORTANT:
   setupElevenLabs();
   setupDeepgramSTT();
 
+  async function speakText(text) {
+    if (elevenLabsWs && elevenLabsWs.readyState === WebSocket.OPEN) {
+      elevenLabsWs.send(
+        JSON.stringify({
+          text,
+          flush: true,
+        }),
+      );
+    }
+  }
+
   ws.on("message", async (message) => {
     try {
       const msg = JSON.parse(message.toString());
 
-      if (msg.event === "start") {
-        streamSid = msg.start.streamSid;
-        callSid = msg.start.callSid || null;
+      if (msg.event === "connected" || msg.event === "start") {
+        streamSid = msg.streamSid || msg.start?.streamSid || msg.stream_sid;
+        exotelCallSid = msg.callSid || msg.call_sid || msg.start?.callSid;
 
         console.log(`📞 Call Active. Stream SID: ${streamSid}`);
-        const leadId = msg.start.customParameters?.leadId;
+        const params =
+          msg.start?.customParameters ||
+          msg.customParameters ||
+          msg.parameters ||
+          {};
 
-        const campaignId = msg.start.customParameters?.campaignId;
+        const leadId = params.leadId;
+        const campaignId = params.campaignId;
+
+        if (!leadId || !campaignId) {
+          console.error("Missing leadId or campaignId in Exotel custom params");
+          return;
+        }
 
         currentLead = await Lead.findById(leadId);
-
         const campaign = await Campaign.findById(campaignId);
 
         if (!currentLead) {
@@ -347,23 +369,11 @@ IMPORTANT:
           return;
         }
 
-        currentLead.callSid = callSid;
+        currentLead.callSid = exotelCallSid;
         currentLead.streamSid = streamSid;
 
         await currentLead.save();
 
-        async function speakText(text) {
-          if (elevenLabsWs && elevenLabsWs.readyState === WebSocket.OPEN) {
-            elevenLabsWs.send(
-              JSON.stringify({
-                text,
-                flush: true,
-              }),
-            );
-          }
-        }
-
-        // 🛠️ FIXED: Removed undefined transcript execution context
         setTimeout(async () => {
           const greeting = campaign?.openingScript || FIRST_GREETING;
 
@@ -379,17 +389,22 @@ IMPORTANT:
         }
       }
 
-      if (msg.event === "stop") {
-        console.log("🛑 Twilio Stream Stopped");
+      if (msg.event === "stop" || msg.event === "disconnect") {
+        console.log("🛑 Exotel Stream Closed");
         closeConnections();
       }
     } catch (error) {
-      console.error("Twilio Stream error loop:", error.message);
+      console.error("Exotel Stream message handler error:", error.message);
     }
   });
 
   ws.on("close", () => {
     console.log("❌ Call Disconnected");
+    closeConnections();
+  });
+
+  ws.on("error", (err) => {
+    console.error("❌ Exotel WS Error:", err.message);
     closeConnections();
   });
 
@@ -484,4 +499,4 @@ IMPORTANT:
   }
 };
 
-export { handleTwilioStream };
+export { handleExotelStream };
