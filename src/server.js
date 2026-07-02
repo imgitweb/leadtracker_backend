@@ -113,6 +113,8 @@ app.use(
       "https://crm.cinfy.co",
       "http://app.yogshala.ai",
       "https://yogshala.ai",
+      "https://www.incubationmasters.com",
+      "https://incubationmasters.com",
     ],
     credentials: true,
   }),

@@ -288,9 +288,9 @@ export const sendMessage = async (req, res) => {
 
     try {
       await axios.post(
-        `https://graph.instagram.com/v25.0/17841472440589636/messages`,
+        `https://graph.facebook.com/v25.0/${accountId}/messages`,
         { recipient: { id: customer_ig_id }, message: { text: text } },
-        { params: { access_token: "IGAAO6K423gJtBZAGF2VU5fbjdURmpoT0Y1NUI0bkdxMG83U0FmY29mZADBna1BBeFJhbXZAzUkVadDR6bnBfbEFpMWVzbG1GVkdTd1BJcU4ycmJma3dDX1h2NW5XcEJFTUczcjd0NlJvZAk5nQlNid1h6bW9NaUNUV2FpdmFPNlpkMAZDZD" } }
+        { params: { access_token: account.access_token } }
       );
     } catch (metaError) {
       console.error("Meta API Warning:", metaError.response?.data || metaError.message);
@@ -317,6 +317,46 @@ export const sendMessage = async (req, res) => {
     res.status(500).json({ error: "Failed to send message" });
   }
 };
+
+// export const sendMessage = async (req, res) => {
+//   try {
+//     const { accountId } = req.params;
+//     const { customer_ig_id, text, conversationId } = req.body;
+
+//     const account = await InstagramAccount.findOne({ instagram_user_id: accountId });
+//     if (!account) return res.status(404).json({ error: "Account not found" });
+
+//     try {
+//       await axios.post(
+//         `https://graph.instagram.com/v25.0/17841472440589636/messages`,
+//         { recipient: { id: customer_ig_id }, message: { text: text } },
+//         { params: { access_token: "IGAAO6K423gJtBZAGF2VU5fbjdURmpoT0Y1NUI0bkdxMG83U0FmY29mZADBna1BBeFJhbXZAzUkVadDR6bnBfbEFpMWVzbG1GVkdTd1BJcU4ycmJma3dDX1h2NW5XcEJFTUczcjd0NlJvZAk5nQlNid1h6bW9NaUNUV2FpdmFPNlpkMAZDZD" } }
+//       );
+//     } catch (metaError) {
+//       console.error("Meta API Warning:", metaError.response?.data || metaError.message);
+//       return res.status(400).json({ error: "Failed to deliver message via Meta API", details: metaError.response?.data });
+//     }
+
+//     const newMessage = new Message({
+//       conversation_id: conversationId,
+//       sender_id: accountId,
+//       receiver_id: customer_ig_id,
+//       text: text,
+//       is_from_me: true
+//     });
+//     await newMessage.save();
+
+//     await Conversation.findByIdAndUpdate(conversationId, {
+//       last_message: text,
+//       last_message_time: new Date()
+//     });
+
+//     res.status(200).json({ success: true, message: newMessage });
+//   } catch (error) {
+//     console.error("Send Message Error:", error);
+//     res.status(500).json({ error: "Failed to send message" });
+//   }
+// };
 
 export const toggleIgConversationAI = async (req, res) => {
   try {
