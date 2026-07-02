@@ -7,6 +7,10 @@ const waConversationSchema = new mongoose.Schema({
   last_message: { type: String, default: "" },
   last_message_time: { type: Date, default: Date.now },
   ai_enabled: { type: Boolean, default: true },
+  
+  // 🔥 NEW FIELDS: Lead Tracking
+  is_lead: { type: Boolean, default: false },
+  lead_summary: { type: String, default: "" }
 }, { timestamps: true });
 
 // Normal index for faster search, but NOT unique

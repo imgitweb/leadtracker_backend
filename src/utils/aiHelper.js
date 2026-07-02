@@ -85,13 +85,15 @@ export const generateAIReply = async (
         type: "function",
         function: {
           name: "capture_lead",
-          description: "Trigger this ONLY when the user expresses clear interest in buying, requests a quote, or wants to be contacted.",
+          description: "Trigger this ONLY when the user expresses clear interest in buying, requests a quote, provides their phone number, or wants to be contacted.",
           parameters: {
             type: "object",
             properties: {
+              extractedName: { type: "string", description: "The user's real name if they mentioned it in the chat, otherwise empty." },
               extractedEmail: { type: "string", description: "The user's email if provided, otherwise empty." },
-              priority: { type: "string", enum: ["Low", "Medium", "High"], description: "High if ready to buy. Medium if asking for pricing/details." },
-              summary: { type: "string", description: "A short summary of what the user wants." },
+              extractedPhone: { type: "string", description: "The user's phone number if provided in the chat, otherwise empty." },
+              priority: { type: "string", enum: ["Low", "Medium", "High"], description: "High if ready to buy or provided phone number. Medium if asking for pricing/details." },
+              summary: { type: "string", description: "A short summary of what the user wants and if they provided contact info." },
               replyText: { type: "string", description: "The response message you want to send back to the user right now." }
             },
             required: ["priority", "summary", "replyText"],
@@ -121,16 +123,22 @@ export const generateAIReply = async (
         console.log(`🔥 LEAD DETECTED from ${platform} [${args.priority}]: ${args.summary}`);
 
         try {
-          // Normalize Phone Number for Search (Remove 91 if it's a 12 digit Indian number)
-          let searchPhone = customerData.phone ? customerData.phone.replace(/\D/g, '') : "";
+          // Normalize Phone Number for Search (Check AI extracted phone first, fallback to customerData)
+          let rawPhone = args.extractedPhone || customerData.phone || "";
+          let searchPhone = rawPhone.replace(/\D/g, '');
           if (searchPhone.length === 12 && searchPhone.startsWith('91')) {
             searchPhone = searchPhone.substring(2);
           }
 
-          // Check for existing lead (Re-engagement)
+          // Use extracted name if AI found one, otherwise use FB/IG profile name
+          let finalName = args.extractedName || customerData.name || `${platform} User`;
+
+          // Check for existing lead
           let existingLead = null;
           if (searchPhone) {
             existingLead = await Lead.findOne({ companyId: startupData.userId, phone: searchPhone });
+          } else if (args.extractedEmail) {
+            existingLead = await Lead.findOne({ companyId: startupData.userId, email: args.extractedEmail });
           }
 
           if (existingLead) {
@@ -138,9 +146,10 @@ export const generateAIReply = async (
             existingLead.priority = args.priority === "High" ? "High" : existingLead.priority;
             existingLead.status = "Qualified";
             existingLead.aiSummary = args.summary;
+            if (finalName !== `${platform} User`) existingLead.name = finalName;
             
             if (!existingLead.platformDetails) existingLead.platformDetails = {};
-            existingLead.platformDetails.whatsappRawNumber = customerData.phone;
+            existingLead.platformDetails.whatsappRawNumber = rawPhone;
 
             existingLead.remarks.push({
               note: `🔥 Re-engaged via ${platform} Chat: ${args.summary}`,
@@ -157,13 +166,13 @@ export const generateAIReply = async (
               companyId: startupData.userId,
               status: "New",
               priority: args.priority,
-              name: customerData.name || "WA User",
+              name: finalName,
               email: args.extractedEmail || "",
               phone: searchPhone, 
               source: `${platform} AI`,
               aiSummary: args.summary,
               platformDetails: {
-                whatsappRawNumber: customerData.phone,
+                whatsappRawNumber: rawPhone,
                 platformAccountId: customerData.accountId
               },
               data: {
@@ -180,7 +189,6 @@ export const generateAIReply = async (
           console.error("Error handling lead in DB:", dbErr);
         }
 
-        // Return extracted reply text and lead action
         return {
           text: args.replyText.replace(/\*/g, '').trim(),
           leadAction: leadActionObj
