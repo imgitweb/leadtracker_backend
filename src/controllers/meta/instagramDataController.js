@@ -288,9 +288,9 @@ export const sendMessage = async (req, res) => {
 
     try {
       await axios.post(
-        `https://graph.facebook.com/v25.0/${accountId}/messages`,
+        `https://graph.instagram.com/v25.0/17841472440589636/messages`,
         { recipient: { id: customer_ig_id }, message: { text: text } },
-        { params: { access_token: account.access_token } }
+        { params: { access_token: "IGAAO6K423gJtBZAGF2VU5fbjdURmpoT0Y1NUI0bkdxMG83U0FmY29mZADBna1BBeFJhbXZAzUkVadDR6bnBfbEFpMWVzbG1GVkdTd1BJcU4ycmJma3dDX1h2NW5XcEJFTUczcjd0NlJvZAk5nQlNid1h6bW9NaUNUV2FpdmFPNlpkMAZDZD" } }
       );
     } catch (metaError) {
       console.error("Meta API Warning:", metaError.response?.data || metaError.message);
