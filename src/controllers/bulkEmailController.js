@@ -74,13 +74,15 @@ export const createCampaign = async (req, res) => {
     const payload = { ...req.body };
     
     // Parse recipients if sent as JSON string via FormData
-    if (typeof payload.recipients === 'string') {
-      try {
-        payload.recipients = JSON.parse(payload.recipients);
-      } catch (e) {
-        payload.recipients = [];
+    ['recipients', 'ccRecipients', 'bccRecipients'].forEach(field => {
+      if (typeof payload[field] === 'string') {
+        try {
+          payload[field] = JSON.parse(payload[field]);
+        } catch (e) {
+          payload[field] = [];
+        }
       }
-    }
+    });
 
     // Process attachments
     if (req.files && req.files.length > 0) {
