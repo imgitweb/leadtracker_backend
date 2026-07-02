@@ -130,6 +130,8 @@ const createCampaignDraft = async (companyId, creatorId, payload = {}) => {
   const company = await Company.findById(companyId).select('name').lean();
   const companyName = company?.name || 'Your Company';
   const recipients = normalizeRecipients(payload.recipients || []);
+  const ccRecipients = normalizeRecipients(payload.ccRecipients || []);
+  const bccRecipients = normalizeRecipients(payload.bccRecipients || []);
 
   if (recipients.length === 0) {
     throw new Error('At least one valid recipient is required');
@@ -148,6 +150,8 @@ const createCampaignDraft = async (companyId, creatorId, payload = {}) => {
     textSnapshot: selection.textBody,
     audienceSource: normalizeString(payload.audienceSource || 'manual') || 'manual',
     recipients,
+    ccRecipients,
+    bccRecipients,
     attachments: payload.attachments || [],
     recipientCount: recipients.length,
     scheduleAt: shouldSendImmediately ? null : scheduleAt,
@@ -472,6 +476,8 @@ export class BulkEmailService {
           const mailOptions = {
             from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
             to: recipient.email,
+            cc: (campaign.ccRecipients || []).map(r => r.email).filter(Boolean).join(', ') || undefined,
+            bcc: (campaign.bccRecipients || []).map(r => r.email).filter(Boolean).join(', ') || undefined,
             subject,
             html: wrappedHtml,
             text: text || undefined,

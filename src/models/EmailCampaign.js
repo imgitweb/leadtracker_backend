@@ -52,6 +52,8 @@ const emailCampaignSchema = new mongoose.Schema(
     textSnapshot: { type: String, default: '' },
     audienceSource: { type: String, trim: true, default: 'manual' },
     recipients: { type: [recipientSchema], default: [] },
+    ccRecipients: { type: [recipientSchema], default: [] },
+    bccRecipients: { type: [recipientSchema], default: [] },
     recipientCount: { type: Number, default: 0 },
     sentCount: { type: Number, default: 0 },
     failedCount: { type: Number, default: 0 },
