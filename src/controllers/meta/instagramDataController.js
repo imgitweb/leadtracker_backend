@@ -278,45 +278,6 @@ export const getMessages = async (req, res) => {
   }
 };
 
-// export const sendMessage = async (req, res) => {
-//   try {
-//     const { accountId } = req.params;
-//     const { customer_ig_id, text, conversationId } = req.body;
-
-//     const account = await InstagramAccount.findOne({ instagram_user_id: accountId });
-//     if (!account) return res.status(404).json({ error: "Account not found" });
-
-//     try {
-//       await axios.post(
-//         `https://graph.facebook.com/v25.0/${accountId}/messages`,
-//         { recipient: { id: customer_ig_id }, message: { text: text } },
-//         { params: { access_token: account.access_token } }
-//       );
-//     } catch (metaError) {
-//       console.error("Meta API Warning:", metaError.response?.data || metaError.message);
-//       return res.status(400).json({ error: "Failed to deliver message via Meta API", details: metaError.response?.data });
-//     }
-
-//     const newMessage = new Message({
-//       conversation_id: conversationId,
-//       sender_id: accountId,
-//       receiver_id: customer_ig_id,
-//       text: text,
-//       is_from_me: true
-//     });
-//     await newMessage.save();
-
-//     await Conversation.findByIdAndUpdate(conversationId, {
-//       last_message: text,
-//       last_message_time: new Date()
-//     });
-
-//     res.status(200).json({ success: true, message: newMessage });
-//   } catch (error) {
-//     console.error("Send Message Error:", error);
-//     res.status(500).json({ error: "Failed to send message" });
-//   }
-// };
 
 export const sendMessage = async (req, res) => {
   try {
