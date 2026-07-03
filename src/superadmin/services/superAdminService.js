@@ -568,6 +568,7 @@ export class SuperAdminService {
       throw new Error('Company not found');
     }
 
+    const oldPlan = company.plan;
     company.plan = normalizedPlan;
     await company.save();
 
@@ -576,13 +577,59 @@ export class SuperAdminService {
       company: company._id,
       action: 'company_plan_changed',
       resource: 'Company',
-      resourceId: company._id,
-      changes: { after: { plan: normalizedPlan, maxUsers: company.maxUsers, maxLeads: company.maxLeads } },
       status: 'success',
-      description: `Company plan updated to ${normalizedPlan}`,
+      details: {
+        oldPlan,
+        newPlan: company.plan,
+        maxUsers: company.maxUsers,
+        maxLeads: company.maxLeads,
+      },
+      description: `Super admin updated company plan to ${company.plan}`,
     });
 
-    return company.toObject();
+    return {
+      message: `Plan updated to ${company.plan}`,
+      company,
+    };
+  }
+
+  static async renewCompanyCycle(companyId, superAdminId, { durationInDays = 30 } = {}) {
+    if (!mongoose.Types.ObjectId.isValid(companyId)) {
+      throw new Error('Invalid ID');
+    }
+
+    const company = await Company.findById(companyId);
+    if (!company) {
+      throw new Error('Company not found');
+    }
+
+    const oldEndDate = company.planEndDate;
+    
+    // Set new cycle
+    const now = new Date();
+    company.planStartDate = now;
+    company.planEndDate = new Date(now.getTime() + durationInDays * 24 * 60 * 60 * 1000);
+
+    await company.save();
+
+    await AuditLog.create({
+      user: superAdminId,
+      company: company._id,
+      action: 'company_cycle_renewed',
+      status: 'success',
+      details: {
+        oldEndDate,
+        newStartDate: company.planStartDate,
+        newEndDate: company.planEndDate,
+        durationInDays
+      },
+      description: `Super admin renewed company billing cycle for ${durationInDays} days`,
+    });
+
+    return {
+      message: 'Company cycle renewed successfully',
+      company,
+    };
   }
 
   static async updateCompanyStatus(companyId, adminUserId, isActive) {
@@ -743,6 +790,84 @@ export class SuperAdminService {
       },
       recentAuditLogs,
     };
+  }
+
+  static async listCompanyLeads(companyId, { page = 1, limit = 20, search } = {}) {
+    if (!mongoose.Types.ObjectId.isValid(companyId)) {
+      throw new Error('Invalid companyId');
+    }
+
+    const { skip, limit: pageLimit, page: safePage } = getPaging(page, limit);
+    const query = { companyId: new mongoose.Types.ObjectId(companyId) };
+
+    if (search) {
+      const regex = buildSearchRegex(search);
+      query.$or = [
+        { name: regex },
+        { email: regex },
+        { phone: regex },
+      ];
+    }
+
+    const [leads, total] = await Promise.all([
+      Lead.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(pageLimit)
+        .lean(),
+      Lead.countDocuments(query),
+    ]);
+
+    return {
+      leads,
+      pagination: {
+        total,
+        page: safePage,
+        limit: pageLimit,
+        pages: Math.ceil(total / pageLimit),
+      },
+    };
+  }
+
+  static async deleteCompanyLead(companyId, leadId, superAdminId) {
+    if (!mongoose.Types.ObjectId.isValid(companyId) || !mongoose.Types.ObjectId.isValid(leadId)) {
+      throw new Error('Invalid ID');
+    }
+
+    const lead = await Lead.findOneAndDelete({ _id: leadId, companyId });
+    if (!lead) {
+      throw new Error('Lead not found in this company');
+    }
+
+    await AuditLog.create({
+      user: superAdminId,
+      company: companyId,
+      action: 'superadmin_deleted_lead',
+      status: 'success',
+      details: { leadId, name: lead.name, email: lead.email },
+      description: `Super admin deleted a lead: ${lead.name || lead.email || lead._id}`,
+    });
+
+    return { message: 'Lead deleted successfully' };
+  }
+
+  static async bulkDeleteCompanyLeads(companyId, leadIds, superAdminId) {
+    if (!mongoose.Types.ObjectId.isValid(companyId) || !Array.isArray(leadIds) || leadIds.length === 0) {
+      throw new Error('Invalid input');
+    }
+
+    const result = await Lead.deleteMany({ _id: { $in: leadIds }, companyId });
+
+    await AuditLog.create({
+      user: superAdminId,
+      company: companyId,
+      action: 'superadmin_bulk_deleted_leads',
+      status: 'success',
+      details: { count: result.deletedCount },
+      description: `Super admin bulk deleted ${result.deletedCount} leads.`,
+    });
+
+    return { message: `${result.deletedCount} leads deleted successfully`, deletedCount: result.deletedCount };
   }
 
   static async listAuditLogs({ page = 1, limit = 20, action, status, userId, companyId } = {}) {
