@@ -19,6 +19,10 @@ import {
   deleteCompany,
   syncCompanyLimits,
   getAuditLogs,
+  deleteCompanyLead,
+  bulkDeleteCompanyLeads,
+  getCompanyLeads,
+  renewCompanyCycle,
 } from '../controllers/superAdminController.js';
 import moduleRoutes from './moduleRoutes.js';
 
@@ -44,6 +48,10 @@ router.patch('/companies/:companyId/plan', updateCompanyPlan);
 router.patch('/companies/:companyId/status', updateCompanyStatus);
 router.delete('/companies/:companyId', deleteCompany);
 router.post('/companies/:companyId/sync-limits', syncCompanyLimits);
+router.post('/companies/:companyId/renew-cycle', renewCompanyCycle);
+router.get('/companies/:companyId/leads', getCompanyLeads);
+router.delete('/companies/:companyId/leads/:leadId', deleteCompanyLead);
+router.post('/companies/:companyId/leads/bulk-delete', bulkDeleteCompanyLeads);
 
 router.get('/audit-logs', getAuditLogs);
 router.use('/modules', moduleRoutes);
