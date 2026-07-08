@@ -1,5 +1,5 @@
-import { SuperAdminService } from '../services/superAdminService.js';
 import { sendResponse, sendError } from '../../utils/helpers.js';
+import { SuperAdminService } from '../services/superAdminService.js';
 
 export const getOverview = async (req, res) => {
   try {
@@ -114,6 +114,16 @@ export const updateCompanyPlan = async (req, res) => {
   }
 };
 
+export const renewCompanyCycle = async (req, res) => {
+  try {
+    const { durationInDays } = req.body;
+    const result = await SuperAdminService.renewCompanyCycle(req.params.companyId, req.user._id, { durationInDays });
+    sendResponse(res, 200, true, result.message, result.company);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
 export const updateCompanyStatus = async (req, res) => {
   try {
     const { isActive } = req.body;
@@ -160,5 +170,34 @@ export const getCompanyDetails = async (req, res) => {
     sendResponse(res, 200, true, 'Company details fetched successfully', result);
   } catch (error) {
     sendError(res, 404, error.message, error);
+  }
+};
+
+export const getCompanyLeads = async (req, res) => {
+  try {
+    const { page, limit, search } = req.query;
+    const result = await SuperAdminService.listCompanyLeads(req.params.companyId, { page, limit, search });
+    sendResponse(res, 200, true, 'Company leads fetched successfully', result);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+export const deleteCompanyLead = async (req, res) => {
+  try {
+    const result = await SuperAdminService.deleteCompanyLead(req.params.companyId, req.params.leadId, req.user._id);
+    sendResponse(res, 200, true, result.message);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+export const bulkDeleteCompanyLeads = async (req, res) => {
+  try {
+    const { leadIds } = req.body;
+    const result = await SuperAdminService.bulkDeleteCompanyLeads(req.params.companyId, leadIds, req.user._id);
+    sendResponse(res, 200, true, result.message);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
   }
 };
