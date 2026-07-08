@@ -58,11 +58,11 @@ import metaCampaignsRoutes from "./routes/meta/metaAdsCampaignRoutes.js";
 import webhookRoutes from "./routes/meta/webhookRoutes.js";
 
 
-import agentRoutes from "./routes/agentRoutes.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
 import "./services/campaignWorker.js";
+import exotelWebhookRoutes from "./routes/exotelWebhook.js";
 
-import { handleTwilioStream } from "./controllers/streamController.js";
+import { handleExotelStream } from "./controllers/streamController.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -84,7 +84,7 @@ const io = new Server(server, {
   },
 });
 
-app.set("socketio", io);
+app.set('socketio', io);
 
 await connectDB();
 await CompanyModuleService.syncSystemModules();
@@ -165,7 +165,7 @@ app.use('/api/forms', formRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/knowledge-repository', knowledgeRepositoryRoutes);
 app.use('/api/superadmin', superAdminRoutes);
-
+// app.use('/api/bulk-email', bulkEmailRoutes);
 
 app.use("/api/ai", aiRoutes);
 app.use("/api/chat", chatRoutes);
@@ -188,8 +188,14 @@ app.use("/api/meta-campaigns", metaCampaignsRoutes);
 app.use("/api/bulk-email", bulkMailRoutes);
 
 // ── AI Calling Agent Routes ───────────────────────────────────────
-app.use("/api/agent", agentRoutes);
-app.use("/api/campaigns", campaignRoutes);
+// NOTE: mounted at root, NOT "/api/campaigns" — campaignRoutes.js
+// already defines its own full paths ("/campaigns", "/api/campaigns/create",
+// etc.) to match what the frontend (CallCampaign.jsx) calls directly.
+// Mounting it under "/api/campaigns" here would double-prefix every
+// route (e.g. "/api/campaigns/api/campaigns/create") and break the UI.
+app.use(campaignRoutes);
+
+app.use("/api/exotel/webhook", exotelWebhookRoutes);
 // ─────────────────────────────────────────────────────────────────
 
 app.use(notFound);
@@ -198,18 +204,17 @@ app.use(errorHandler);
 // ============ SOCKET.IO CONNECTION ============
 io.on("connection", (socket) => {
   console.log(`🟢 New Client Connected: ${socket.id}`);
-
-  socket.on("disconnect", () => {
+  socket.on('disconnect', () => {
     console.log(`🔴 Client Disconnected: ${socket.id}`);
   });
 });
 
-// ============ WEBSOCKET — TWILIO MEDIA STREAM ============
+// ============ WEBSOCKET — EXOTEL VOICE STREAM ============
 const wss = new WebSocketServer({ server, path: "/media-stream" });
 
 wss.on("connection", (ws, req) => {
-  console.log("✅ Twilio WebSocket connected at:", req.url);
-  handleTwilioStream(ws);
+  console.log("✅ Exotel WebSocket connected at:", req.url);
+  handleExotelStream(ws);
 });
 
 wss.on("error", (error) => {
