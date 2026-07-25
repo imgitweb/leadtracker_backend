@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import XLSX from 'xlsx';
 import User from '../../models/User.js';
 import Company from '../../models/Company.js';
 import Lead from '../../models/Lead.js';
@@ -1031,6 +1032,125 @@ export class SuperAdminService {
         limit: pageLimit,
         pages: Math.ceil(total / pageLimit),
       },
+    };
+  }
+
+  static async exportCompanyLeads(companyId, { status, source } = {}) {
+    if (!mongoose.Types.ObjectId.isValid(companyId)) {
+      throw new Error('Invalid companyId');
+    }
+
+    const company = await Company.findById(companyId).lean();
+    if (!company) {
+      throw new Error('Company not found');
+    }
+
+    const query = { companyId: new mongoose.Types.ObjectId(companyId) };
+    if (status && status !== 'all') query.status = status;
+    if (source && source !== 'all') query.source = source;
+
+    const leads = await Lead.find(query)
+      .sort({ createdAt: -1 })
+      .populate('createdBy', 'fullName email')
+      .populate('assignedTo', 'fullName email')
+      .populate('formId', 'name')
+      .populate('remarks.createdBy', 'fullName email')
+      .populate('followUps.createdBy', 'fullName email')
+      .lean();
+
+    if (leads.length === 0) {
+      throw new Error('No leads found to export');
+    }
+
+    // Collect all unique dynamic data keys across all leads
+    const dynamicKeys = new Set();
+    let maxRemarks = 0;
+    let maxFollowUps = 0;
+    for (const lead of leads) {
+      if (lead.data && typeof lead.data === 'object' && !Array.isArray(lead.data)) {
+        Object.keys(lead.data).forEach(k => dynamicKeys.add(k));
+      }
+      if (Array.isArray(lead.remarks)) maxRemarks = Math.max(maxRemarks, lead.remarks.length);
+      if (Array.isArray(lead.followUps)) maxFollowUps = Math.max(maxFollowUps, lead.followUps.length);
+    }
+
+    const formatDate = (d) => d ? new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '';
+
+    // Build rows
+    const rows = leads.map((lead, index) => {
+      const row = {
+        'S.No': index + 1,
+        'Name': lead.name || '',
+        'Email': lead.email || '',
+        'Phone': lead.phone || '',
+        'Status': lead.status || 'New',
+        'Priority': lead.priority || 'Medium',
+        'Source': lead.source || 'Website',
+        'Form': lead.formId?.name || '',
+        'Created By': lead.createdBy?.fullName || '',
+        'Assigned To': Array.isArray(lead.assignedTo)
+          ? lead.assignedTo.map(u => u.fullName || u.email).join(', ')
+          : '',
+        'Tags': Array.isArray(lead.tags) ? lead.tags.join(', ') : '',
+        'AI Summary': lead.aiSummary || '',
+      };
+
+      // Remark columns — only as many sets as the max across all leads
+      for (let i = 0; i < maxRemarks; i++) {
+        const remark = lead.remarks?.[i];
+        row[`Remark ${i + 1} - Note`] = remark?.note || '';
+        row[`Remark ${i + 1} - By`] = remark?.createdBy?.fullName || remark?.createdBy?.email || '';
+        row[`Remark ${i + 1} - Date`] = remark ? formatDate(remark.createdAt) : '';
+      }
+
+      // FollowUp columns — only as many sets as the max across all leads
+      for (let i = 0; i < maxFollowUps; i++) {
+        const fu = lead.followUps?.[i];
+        row[`FollowUp ${i + 1} - Note`] = fu?.note || '';
+        row[`FollowUp ${i + 1} - Date`] = fu ? formatDate(fu.date) : '';
+        row[`FollowUp ${i + 1} - By`] = fu?.createdBy?.fullName || fu?.createdBy?.email || '';
+        row[`FollowUp ${i + 1} - Next Date`] = fu ? formatDate(fu.nextFollowUpDate) : '';
+      }
+
+      row['Created At'] = formatDate(lead.createdAt);
+      row['Updated At'] = formatDate(lead.updatedAt);
+
+      // Add dynamic data fields
+      for (const key of dynamicKeys) {
+        const val = lead.data?.[key];
+        if (val !== undefined && val !== null) {
+          row[`Data: ${key}`] = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        } else {
+          row[`Data: ${key}`] = '';
+        }
+      }
+
+      return row;
+    });
+
+    // Create workbook
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+
+    // Auto-fit column widths
+    const colWidths = Object.keys(rows[0]).map(key => ({
+      wch: Math.max(
+        key.length,
+        ...rows.map(row => String(row[key] || '').length).slice(0, 100)
+      ) + 2
+    }));
+    worksheet['!cols'] = colWidths;
+
+    const workbook = XLSX.utils.book_new();
+    const safeCompanyName = (company.name || 'Company').replace(/[^a-zA-Z0-9 ]/g, '').substring(0, 31);
+    XLSX.utils.book_append_sheet(workbook, worksheet, safeCompanyName);
+
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    return {
+      buffer,
+      filename: `${(company.name || 'company').replace(/[^a-zA-Z0-9_-]/g, '_')}_leads_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      totalLeads: leads.length,
+      companyName: company.name,
     };
   }
 }

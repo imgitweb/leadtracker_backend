@@ -29,6 +29,7 @@ import {
   cleanupCompanyLeadsWithoutPhone,
   getLeadsWithoutPhoneList,
   getCompanyLeadsWithoutPhoneList,
+  exportCompanyLeads,
 } from '../controllers/superAdminController.js';
 import moduleRoutes from './moduleRoutes.js';
 
@@ -59,6 +60,7 @@ router.delete('/companies/:companyId', deleteCompany);
 router.post('/companies/:companyId/sync-limits', syncCompanyLimits);
 router.post('/companies/:companyId/renew-cycle', renewCompanyCycle);
 router.get('/companies/:companyId/leads', getCompanyLeads);
+router.get('/companies/:companyId/leads/export', exportCompanyLeads);
 router.get('/companies/:companyId/leads/no-phone', getCompanyLeadsWithoutPhoneList);
 router.get('/companies/:companyId/leads/no-phone-count', getCompanyLeadsWithoutPhoneCount);
 router.delete('/companies/:companyId/leads/cleanup-no-phone', cleanupCompanyLeadsWithoutPhone);

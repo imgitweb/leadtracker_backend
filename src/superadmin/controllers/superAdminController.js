@@ -258,4 +258,17 @@ export const getCompanyLeadsWithoutPhoneList = async (req, res) => {
   }
 };
 
+export const exportCompanyLeads = async (req, res) => {
+  try {
+    const { status, source } = req.query;
+    const result = await SuperAdminService.exportCompanyLeads(req.params.companyId, { status, source });
 
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+    res.setHeader('X-Total-Leads', result.totalLeads);
+    res.setHeader('X-Company-Name', encodeURIComponent(result.companyName));
+    res.send(result.buffer);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
