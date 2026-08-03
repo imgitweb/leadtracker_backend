@@ -14,14 +14,38 @@ const campaignSchema = new mongoose.Schema(
       trim: true,
     },
 
+    // Selected AI Voice
     voice: {
       type: String,
-      default: "monika",
+      default: "keshavi",
     },
 
+    // AI Configuration
+    aiProvider: {
+      type: String,
+      default: "openai",
+    },
+
+    sttProvider: {
+      type: String,
+      default: "deepgram",
+    },
+
+    ttsProvider: {
+      type: String,
+      default: "elevenlabs",
+    },
+
+    telephonyProvider: {
+      type: String,
+      default: "exotel",
+    },
+
+    // Campaign Schedule
     callGapSeconds: {
       type: Number,
       default: 60,
+      min: 5,
     },
 
     startTime: {
@@ -34,7 +58,28 @@ const campaignSchema = new mongoose.Schema(
       default: null,
     },
 
+    startedAt: {
+      type: Date,
+      default: null,
+    },
+
+    completedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // Statistics
     totalLeads: {
+      type: Number,
+      default: 0,
+    },
+
+    totalQueued: {
+      type: Number,
+      default: 0,
+    },
+
+    totalCalling: {
       type: Number,
       default: 0,
     },
@@ -44,7 +89,22 @@ const campaignSchema = new mongoose.Schema(
       default: 0,
     },
 
+    totalCompleted: {
+      type: Number,
+      default: 0,
+    },
+
     totalQualified: {
+      type: Number,
+      default: 0,
+    },
+
+    totalBusy: {
+      type: Number,
+      default: 0,
+    },
+
+    totalNoAnswer: {
       type: Number,
       default: 0,
     },
@@ -54,6 +114,12 @@ const campaignSchema = new mongoose.Schema(
       default: 0,
     },
 
+    progress: {
+      type: Number,
+      default: 0,
+    },
+
+    // Campaign Status
     status: {
       type: String,
       enum: [
@@ -63,8 +129,15 @@ const campaignSchema = new mongoose.Schema(
         "paused",
         "completed",
         "failed",
+        "cancelled",
       ],
-      default: "scheduled",
+      default: "draft",
+    },
+
+    // Notes
+    notes: {
+      type: String,
+      default: "",
     },
   },
   {
@@ -72,6 +145,8 @@ const campaignSchema = new mongoose.Schema(
   }
 );
 
-const Campaign = mongoose.model("Campaign", campaignSchema);
+const Campaign =
+  mongoose.models.Campaign ||
+  mongoose.model("Campaign", campaignSchema);
 
 export default Campaign;

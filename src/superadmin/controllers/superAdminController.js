@@ -201,3 +201,61 @@ export const bulkDeleteCompanyLeads = async (req, res) => {
     sendError(res, 400, error.message, error);
   }
 };
+
+export const getLeadsWithoutPhoneCount = async (req, res) => {
+  try {
+    const result = await SuperAdminService.countLeadsWithoutNumber(null);
+    sendResponse(res, 200, true, 'Count fetched successfully', result);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+export const cleanupLeadsWithoutPhone = async (req, res) => {
+  try {
+    const result = await SuperAdminService.deleteLeadsWithoutNumber(null, req.user._id);
+    sendResponse(res, 200, true, result.message, result);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+export const getCompanyLeadsWithoutPhoneCount = async (req, res) => {
+  try {
+    const result = await SuperAdminService.countLeadsWithoutNumber(req.params.companyId);
+    sendResponse(res, 200, true, 'Count fetched successfully', result);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+export const cleanupCompanyLeadsWithoutPhone = async (req, res) => {
+  try {
+    const result = await SuperAdminService.deleteLeadsWithoutNumber(req.params.companyId, req.user._id);
+    sendResponse(res, 200, true, result.message, result);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+export const getLeadsWithoutPhoneList = async (req, res) => {
+  try {
+    const { page, limit, search } = req.query;
+    const result = await SuperAdminService.listLeadsWithoutNumber(null, { page, limit, search });
+    sendResponse(res, 200, true, 'No-phone leads fetched successfully', result);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+export const getCompanyLeadsWithoutPhoneList = async (req, res) => {
+  try {
+    const { page, limit, search } = req.query;
+    const result = await SuperAdminService.listLeadsWithoutNumber(req.params.companyId, { page, limit, search });
+    sendResponse(res, 200, true, 'No-phone leads fetched successfully', result);
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+

@@ -870,6 +870,129 @@ export class SuperAdminService {
     return { message: `${result.deletedCount} leads deleted successfully`, deletedCount: result.deletedCount };
   }
 
+  static _hasPhoneNumber(lead) {
+    if (!lead) return false;
+
+    if (lead.phone !== undefined && lead.phone !== null) {
+      const cleanPhone = String(lead.phone).replace(/\D/g, '');
+      if (cleanPhone.length >= 6 && cleanPhone.length <= 16) return true;
+    }
+
+    if (lead.data && typeof lead.data === 'object' && !Array.isArray(lead.data)) {
+      for (const [key, val] of Object.entries(lead.data)) {
+        if (val === undefined || val === null) continue;
+        const strVal = String(val);
+        const cleanVal = strVal.replace(/\D/g, '');
+        if (cleanVal.length >= 6 && cleanVal.length <= 16) {
+          const lowerKey = key.toLowerCase();
+          const isPhoneKey = ['phone', 'mobile', 'contact', 'number', 'whatsapp', 'tel', 'call'].some(k => lowerKey.includes(k));
+          if (isPhoneKey || (cleanVal.length >= 8 && cleanVal.length <= 15)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }
+
+  static async countLeadsWithoutNumber(companyId = null) {
+    const query = {};
+    if (companyId) {
+      if (!mongoose.Types.ObjectId.isValid(companyId)) {
+        throw new Error('Invalid companyId');
+      }
+      query.companyId = companyId;
+    }
+
+    const leads = await Lead.find(query, { _id: 1, phone: 1, data: 1 }).lean();
+    let count = 0;
+    for (const lead of leads) {
+      if (!this._hasPhoneNumber(lead)) {
+        count++;
+      }
+    }
+    return { count };
+  }
+
+  static async listLeadsWithoutNumber(companyId = null, { page = 1, limit = 20, search } = {}) {
+    const { skip, limit: pageLimit, page: safePage } = getPaging(page, limit);
+    const query = {};
+    if (companyId) {
+      if (!mongoose.Types.ObjectId.isValid(companyId)) {
+        throw new Error('Invalid companyId');
+      }
+      query.companyId = companyId;
+    }
+
+    if (search) {
+      const regex = buildSearchRegex(search);
+      query.$or = [
+        { name: regex },
+        { email: regex },
+        { phone: regex },
+      ];
+    }
+
+    const allLeads = await Lead.find(query)
+      .sort({ createdAt: -1 })
+      .populate('companyId', 'name')
+      .populate('formId', 'name')
+      .lean();
+
+    const noPhoneLeads = allLeads.filter(lead => !this._hasPhoneNumber(lead));
+    const total = noPhoneLeads.length;
+    const paginatedLeads = noPhoneLeads.slice(skip, skip + pageLimit);
+
+    return {
+      leads: paginatedLeads,
+      pagination: {
+        total,
+        page: safePage,
+        limit: pageLimit,
+        pages: Math.ceil(total / pageLimit),
+      },
+    };
+  }
+
+  static async deleteLeadsWithoutNumber(companyId = null, superAdminId) {
+    const query = {};
+    if (companyId) {
+      if (!mongoose.Types.ObjectId.isValid(companyId)) {
+        throw new Error('Invalid companyId');
+      }
+      query.companyId = companyId;
+    }
+
+    const leads = await Lead.find(query, { _id: 1, phone: 1, data: 1, name: 1, email: 1, companyId: 1 }).lean();
+    const leadIdsToDelete = [];
+    for (const lead of leads) {
+      if (!this._hasPhoneNumber(lead)) {
+        leadIdsToDelete.push(lead._id);
+      }
+    }
+
+    if (leadIdsToDelete.length === 0) {
+      return { message: 'No leads found without phone numbers', deletedCount: 0 };
+    }
+
+    const result = await Lead.deleteMany({ _id: { $in: leadIdsToDelete } });
+
+    await AuditLog.create({
+      user: superAdminId,
+      company: companyId || undefined,
+      action: 'superadmin_cleanup_leads_no_phone',
+      status: 'success',
+      details: { deletedCount: result.deletedCount, companyId: companyId || 'ALL' },
+      description: `Super admin removed ${result.deletedCount} lead${result.deletedCount !== 1 ? 's' : ''} without phone numbers${companyId ? ` for company ${companyId}` : ' across all companies'}.`,
+    });
+
+    return {
+      message: `Successfully removed ${result.deletedCount} lead${result.deletedCount !== 1 ? 's' : ''} without phone numbers`,
+      deletedCount: result.deletedCount,
+    };
+  }
+
   static async listAuditLogs({ page = 1, limit = 20, action, status, userId, companyId } = {}) {
     const { skip, limit: pageLimit, page: safePage } = getPaging(page, limit);
     const query = {};
