@@ -46,7 +46,7 @@ export const sendWaMessage = async (req, res) => {
     
     // WhatsApp Cloud API Messaging Endpoint
     const response = await axios.post(
-      `https://graph.facebook.com/v23.0/${phoneId}/messages`,
+      `https://graph.facebook.com/v25.0/${phoneId}/messages`,
       {
         messaging_product: "whatsapp",
         to: customer_phone,
@@ -387,7 +387,7 @@ export const createWhatsAppTemplate = async (req, res) => {
 //       components: components
 //     };
 
-//     // Agar variables use huye hain toh Meta v23.0 requires parameter_format to be specified explicitly
+//     // Agar variables use huye hain toh Meta v25.0 requires parameter_format to be specified explicitly
 //     if (hasVariables) {
 //       templatePayload.parameter_format = "POSITIONAL"; // or "NAMED" depending on syntax
 //     }
@@ -466,7 +466,7 @@ export const syncWaTemplates = async (req, res) => {
 
     // Fetch ALL templates directly from Meta
     const response = await axios.get(
-      `https://graph.facebook.com/v23.0/${waba_id}/message_templates`,
+      `https://graph.facebook.com/v25.0/${waba_id}/message_templates`,
       { headers: { Authorization: `Bearer ${access_token}` } }
     );
 
@@ -533,7 +533,7 @@ export const refreshTemplateStatus = async (req, res) => {
 
     // Call Meta API to get ONLY the status of this specific template
     const response = await axios.get(
-      `https://graph.facebook.com/v23.0/${dbTemplate.meta_template_id}?fields=status`,
+      `https://graph.facebook.com/v25.0/${dbTemplate.meta_template_id}?fields=status`,
       { headers: { Authorization: `Bearer ${account.access_token}` } }
     );
 
@@ -626,7 +626,7 @@ export const sendBulkWaTemplate = async (req, res) => {
           form.append('messaging_product', 'whatsapp');
 
           const uploadRes = await axios.post(
-            `https://graph.facebook.com/v23.0/${phoneId}/media`,
+            `https://graph.facebook.com/v25.0/${phoneId}/media`,
             form,
             {
               headers: {
@@ -733,7 +733,7 @@ export const sendBulkWaTemplate = async (req, res) => {
 
         // --- Fire API Request ---
         const metaResponse = await axios.post(
-          `https://graph.facebook.com/v23.0/${phoneId}/messages`,
+          `https://graph.facebook.com/v25.0/${phoneId}/messages`,
           payload,
           {
             headers: {
@@ -918,7 +918,7 @@ export const sendBulkWaTemplate = async (req, res) => {
 
 //         // Send via Meta
 //         const metaResponse = await axios.post(
-//           `https://graph.facebook.com/v23.0/${phoneId}/messages`,
+//           `https://graph.facebook.com/v25.0/${phoneId}/messages`,
 //           payload,
 //           {
 //             headers: {
@@ -1046,7 +1046,7 @@ export const getWaTemplateAnalytics = async (req, res) => {
 
     // 4. Fetch Analytics strictly from Meta Graph API
     const response = await axios.get(
-      `https://graph.facebook.com/v23.0/${account.waba_id}/template_analytics`,
+      `https://graph.facebook.com/v25.0/${account.waba_id}/template_analytics`,
       {
         headers: { Authorization: `Bearer ${account.access_token}` },
         params: {
@@ -1170,7 +1170,7 @@ export const getWaAccountInsights = async (req, res) => {
     }
 
     const response = await axios.get(
-      `https://graph.facebook.com/v23.0/${account.waba_id}/template_analytics`,
+      `https://graph.facebook.com/v25.0/${account.waba_id}/template_analytics`,
       {
         headers: { Authorization: `Bearer ${account.access_token}` },
         params: { start, end, granularity: "DAILY", template_ids: formattedTemplateIdsArray }
@@ -1272,12 +1272,12 @@ export const getWaProfileDetails = async (req, res) => {
     // Meta API se Profile aur Name dono ek sath fetch karein
     const [profileRes, phoneRes] = await Promise.all([
       axios.get(
-        `https://graph.facebook.com/v23.0/${phoneId}/whatsapp_business_profile`,
+        `https://graph.facebook.com/v25.0/${phoneId}/whatsapp_business_profile`,
         { headers: { Authorization: `Bearer ${account.access_token}` }, params: { fields: "about,address,description,email,profile_picture_url,websites,vertical" } }
       ).catch(() => ({ data: { data: [{}] } })), // Fallback if empty
       
       axios.get(
-        `https://graph.facebook.com/v23.0/${phoneId}`,
+        `https://graph.facebook.com/v25.0/${phoneId}`,
         { headers: { Authorization: `Bearer ${account.access_token}` }, params: { fields: "verified_name,name_status" } }
       ).catch(() => ({ data: {} })) // Fallback
     ]);
@@ -1335,7 +1335,7 @@ export const updateWaProfileDetails = async (req, res) => {
 
     if (shouldUpdateProfile) {
       await axios.post(
-        `https://graph.facebook.com/v23.0/${phoneId}/whatsapp_business_profile`,
+        `https://graph.facebook.com/v25.0/${phoneId}/whatsapp_business_profile`,
         payload,
         { headers: { Authorization: `Bearer ${account.access_token}`, "Content-Type": "application/json" } }
       );
@@ -1344,7 +1344,7 @@ export const updateWaProfileDetails = async (req, res) => {
     // 2. About Text update (Status)
     if (about !== undefined && about !== account.about) {
       await axios.post(
-        `https://graph.facebook.com/v23.0/${phoneId}/settings`,
+        `https://graph.facebook.com/v25.0/${phoneId}/settings`,
         { 
           messaging_product: "whatsapp", // <-- Yahan bhi zaroori hai
           about: about 
@@ -1356,7 +1356,7 @@ export const updateWaProfileDetails = async (req, res) => {
     // 3. DISPLAY NAME Update (Meta Review Required)
     if (verified_name && verified_name !== account.verified_name) {
       await axios.post(
-        `https://graph.facebook.com/v23.0/${phoneId}`,
+        `https://graph.facebook.com/v25.0/${phoneId}`,
         { 
           messaging_product: "whatsapp", // <-- Yahan bhi zaroori hai
           verified_name: verified_name 
@@ -1384,6 +1384,7 @@ export const updateWaProfileDetails = async (req, res) => {
   }
 };
 
+
 // ==========================================
 // 14. UPDATE PROFILE PHOTO ONLY (Meta + DB Sync)
 // ==========================================
@@ -1403,7 +1404,7 @@ export const updateWaProfilePhoto = async (req, res) => {
     form.append("file", req.file.buffer, { filename: req.file.originalname, contentType: req.file.mimetype });
 
     const mediaRes = await axios.post(
-      `https://graph.facebook.com/v23.0/${phoneId}/media`,
+      `https://graph.facebook.com/v25.0/${phoneId}/media`,
       form,
       { headers: { ...form.getHeaders(), Authorization: `Bearer ${account.access_token}` } }
     );
@@ -1412,14 +1413,14 @@ export const updateWaProfilePhoto = async (req, res) => {
 
     // Step B: File Handle ko WhatsApp Business Profile mein set karein
     await axios.post(
-      `https://graph.facebook.com/v23.0/${phoneId}/whatsapp_business_profile`,
+      `https://graph.facebook.com/v25.0/${phoneId}/whatsapp_business_profile`,
       { profile_picture: fileHandle },
       { headers: { Authorization: `Bearer ${account.access_token}`, "Content-Type": "application/json" } }
     );
 
     // Step C: Naya profile_picture_url fetch karein aur DB me update karein
     const profileRes = await axios.get(
-      `https://graph.facebook.com/v23.0/${phoneId}/whatsapp_business_profile?fields=profile_picture_url`,
+      `https://graph.facebook.com/v25.0/${phoneId}/whatsapp_business_profile?fields=profile_picture_url`,
       { headers: { Authorization: `Bearer ${account.access_token}` } }
     );
 
@@ -1512,7 +1513,6 @@ export const updateTemplatePurpose = async (req, res) => {
     res.status(500).json({ error: "Internal server error while updating purpose." });
   }
 };
-
 
 
 // ==========================================
@@ -1608,7 +1608,7 @@ export const subscribeWabaApp = async (req, res) => {
     }
 
     // Meta Graph API URL 
-    const apiVersion = process.env.META_API_VERSION || "v23.0";
+    const apiVersion = process.env.META_API_VERSION || "v25.0";
     const url = `https://graph.facebook.com/${apiVersion}/${WABA_ID}/subscribed_apps`;
 
     // Meta API ko POST request bhejein
