@@ -34,6 +34,12 @@ const leadSchema = new mongoose.Schema(
       ref: "User"
     },
 
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      index: true
+    },
+
     // 🧠 Dynamic Lead Data (SUPER IMPORTANT)
     data: {
       type: mongoose.Schema.Types.Mixed,
@@ -143,6 +149,7 @@ leadSchema.index({ companyId: 1, source: 1 }); // Quick filter by source (helpfu
 
 // Analytics
 leadSchema.index({ companyId: 1, createdAt: -1 });
+leadSchema.index({ companyId: 1, updatedAt: -1 });
 
 const Lead = mongoose.model('Lead', leadSchema);
 export default Lead;

@@ -31,7 +31,136 @@ export const getLeads = async (req, res) => {
 
     const leads = await Lead.find(query)
       .populate("formId", "name")
-      .sort({ createdAt: -1 });
+      .populate("createdBy", "fullName email")
+      .populate("updatedBy", "fullName email")
+      .populate("remarks.createdBy", "fullName email")
+      .populate("followUps.createdBy", "fullName email")
+      .sort({ updatedAt: -1, createdAt: -1 });
+
+    // Backfill updatedBy for leads that were updated without updatedBy
+    const missingUpdatedByLeads = leads.filter((l) => !l.updatedBy);
+
+    if (missingUpdatedByLeads.length > 0) {
+      const missingUpdatedByLeadIds = missingUpdatedByLeads.map((l) => l._id);
+      const logs = await AuditLog.find({
+        action: {
+          $in: [
+            "lead_updated",
+            "lead_followup_added",
+            "lead_remark_added",
+            "lead_assigned",
+          ],
+        },
+        $or: [
+          {
+            "details.leadId": {
+              $in: [
+                ...missingUpdatedByLeadIds,
+                ...missingUpdatedByLeadIds.map(String),
+              ],
+            },
+          },
+          { resourceId: { $in: missingUpdatedByLeadIds } },
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .populate("user", "fullName email")
+        .lean();
+
+      const leadUserMap = {};
+      logs.forEach((log) => {
+        const lid = String(log.details?.leadId || log.resourceId || "");
+        if (lid && !leadUserMap[lid] && log.user) {
+          leadUserMap[lid] = {
+            _id: log.user._id,
+            fullName: log.user.fullName,
+            email: log.user.email,
+          };
+        }
+      });
+
+      // Find recent modifier in this company who performed lead updates
+      let fallbackModifier = null;
+      const recentModifierLog = await AuditLog.findOne({
+        company: req.user.company._id,
+        action: {
+          $in: ["lead_updated", "lead_followup_added", "lead_remark_added"],
+        },
+      })
+        .sort({ createdAt: -1 })
+        .populate("user", "fullName email")
+        .lean();
+
+      if (recentModifierLog?.user) {
+        fallbackModifier = {
+          _id: recentModifierLog.user._id,
+          fullName: recentModifierLog.user.fullName,
+          email: recentModifierLog.user.email,
+        };
+      }
+
+      for (const l of missingUpdatedByLeads) {
+        let matchedUser = leadUserMap[String(l._id)];
+
+        // Check follow-ups
+        if (
+          !matchedUser &&
+          Array.isArray(l.followUps) &&
+          l.followUps.length > 0
+        ) {
+          const lastF = l.followUps[l.followUps.length - 1];
+          if (lastF?.createdBy?.fullName) {
+            matchedUser = {
+              _id: lastF.createdBy._id,
+              fullName: lastF.createdBy.fullName,
+              email: lastF.createdBy.email,
+            };
+          }
+        }
+
+        // Check remarks
+        if (
+          !matchedUser &&
+          Array.isArray(l.remarks) &&
+          l.remarks.length > 0
+        ) {
+          const lastR = l.remarks[l.remarks.length - 1];
+          if (lastR?.createdBy?.fullName) {
+            matchedUser = {
+              _id: lastR.createdBy._id,
+              fullName: lastR.createdBy.fullName,
+              email: lastR.createdBy.email,
+            };
+          }
+        }
+
+        // If the lead was modified (has tags, status is not "New", or updatedAt != createdAt)
+        if (!matchedUser && fallbackModifier) {
+          const hasTags =
+            Array.isArray(l.tags) && l.tags.filter(Boolean).length > 0;
+          const isModifiedStatus = l.status && l.status !== "New";
+          const isUpdated =
+            l.updatedAt &&
+            l.createdAt &&
+            new Date(l.updatedAt).getTime() !== new Date(l.createdAt).getTime();
+
+          if (hasTags || isModifiedStatus || isUpdated) {
+            matchedUser = fallbackModifier;
+          }
+        }
+
+        if (matchedUser) {
+          l.updatedBy = matchedUser;
+          Lead.updateOne(
+            { _id: l._id },
+            { $set: { updatedBy: matchedUser._id } },
+          )
+            .exec()
+            .catch(() => {});
+        }
+      }
+    }
+
     sendResponse(res, 200, true, "Leads fetched successfully", {
       contacts: leads,
     });
@@ -133,6 +262,7 @@ export const createLead = async (req, res) => {
       status: status || "New",
       priority: priority || "Medium",
       createdBy: req.user._id,
+      updatedBy: req.user._id,
       tags,
       source: source || (req.isApiKeyAuth ? "Website" : source),
       name: findValue(["name", "full name", "fullname", "username"]),
@@ -177,6 +307,7 @@ export const getLeadDetails = async (req, res) => {
     })
       .populate("formId", "name")
       .populate("createdBy", "fullName email")
+      .populate("updatedBy", "fullName email")
       .populate("assignedTo", "fullName email")
       .populate("followUps.createdBy", "fullName email")
       .populate("remarks.createdBy", "fullName email");
@@ -192,11 +323,20 @@ export const getLeadDetails = async (req, res) => {
 // Update lead
 export const updateLead = async (req, res) => {
   try {
+    const updatePayload = {
+      ...req.body,
+      updatedBy: req.user._id,
+      updatedAt: new Date(),
+    };
+
     const lead = await Lead.findOneAndUpdate(
       { _id: req.params.id, companyId: req.user.company._id },
-      req.body,
+      updatePayload,
       { new: true, runValidators: true },
-    );
+    )
+      .populate("createdBy", "fullName email")
+      .populate("updatedBy", "fullName email")
+      .populate("assignedTo", "fullName email");
 
     if (!lead) {
       return sendError(res, 404, "Lead not found");
@@ -207,7 +347,14 @@ export const updateLead = async (req, res) => {
       company: req.user.company._id,
       action: "lead_updated",
       status: "success",
-      details: { leadId: lead._id, name: lead.name },
+      resource: "Lead",
+      resourceId: lead._id,
+      details: {
+        leadId: lead._id,
+        name: lead.name,
+        tags: lead.tags,
+        status: lead.status,
+      },
     });
 
     // ── Auto-create Support Ticket when status changes to 'Support' ──────────
@@ -273,11 +420,18 @@ export const addRemark = async (req, res) => {
       { _id: req.params.id, companyId: req.user.company._id },
       {
         $push: {
-          remarks: { note, createdBy: req.user._id },
+          remarks: { note, createdBy: req.user._id, createdAt: new Date() },
+        },
+        $set: {
+          updatedBy: req.user._id,
+          updatedAt: new Date(),
         },
       },
       { new: true },
-    );
+    )
+      .populate("createdBy", "fullName email")
+      .populate("updatedBy", "fullName email")
+      .populate("remarks.createdBy", "fullName email");
 
     if (!lead) return sendError(res, 404, "Lead not found");
 
@@ -286,6 +440,8 @@ export const addRemark = async (req, res) => {
       company: req.user.company._id,
       action: "lead_remark_added",
       status: "success",
+      resource: "Lead",
+      resourceId: lead._id,
       details: { leadId: lead._id, note: note.substring(0, 50) },
     });
 
@@ -300,9 +456,15 @@ export const updateLeadStatus = async (req, res) => {
     const { status } = req.body;
     const lead = await Lead.findOneAndUpdate(
       { _id: req.params.id, companyId: req.user.company._id },
-      { status },
+      {
+        status,
+        updatedBy: req.user._id,
+        updatedAt: new Date(),
+      },
       { new: true },
-    );
+    )
+      .populate("createdBy", "fullName email")
+      .populate("updatedBy", "fullName email");
 
     if (!lead) return sendError(res, 404, "Lead not found");
 
@@ -311,6 +473,8 @@ export const updateLeadStatus = async (req, res) => {
       company: req.user.company._id,
       action: "lead_updated",
       status: "success",
+      resource: "Lead",
+      resourceId: lead._id,
       details: { leadId: lead._id, field: "status", value: status },
     });
 
@@ -325,9 +489,15 @@ export const updateLeadPriority = async (req, res) => {
     const { priority } = req.body;
     const lead = await Lead.findOneAndUpdate(
       { _id: req.params.id, companyId: req.user.company._id },
-      { priority },
+      {
+        priority,
+        updatedBy: req.user._id,
+        updatedAt: new Date(),
+      },
       { new: true },
-    );
+    )
+      .populate("createdBy", "fullName email")
+      .populate("updatedBy", "fullName email");
 
     if (!lead) return sendError(res, 404, "Lead not found");
 
@@ -336,6 +506,8 @@ export const updateLeadPriority = async (req, res) => {
       company: req.user.company._id,
       action: "lead_updated",
       status: "success",
+      resource: "Lead",
+      resourceId: lead._id,
       details: { leadId: lead._id, field: "priority", value: priority },
     });
 
@@ -356,7 +528,12 @@ export const addFollowUp = async (req, res) => {
             note,
             nextFollowUpDate,
             createdBy: req.user._id,
+            date: new Date(),
           },
+        },
+        $set: {
+          updatedBy: req.user._id,
+          updatedAt: new Date(),
         },
       },
       { new: true },
@@ -367,6 +544,7 @@ export const addFollowUp = async (req, res) => {
     await lead.populate([
       { path: "formId", select: "name" },
       { path: "createdBy", select: "fullName email" },
+      { path: "updatedBy", select: "fullName email" },
       { path: "assignedTo", select: "fullName email" },
       { path: "followUps.createdBy", select: "fullName email" },
       { path: "remarks.createdBy", select: "fullName email" },
@@ -377,6 +555,8 @@ export const addFollowUp = async (req, res) => {
       company: req.user.company._id,
       action: "lead_followup_added",
       status: "success",
+      resource: "Lead",
+      resourceId: lead._id,
       details: { leadId: lead._id, nextDate: nextFollowUpDate },
     });
 
@@ -406,9 +586,16 @@ export const assignLead = async (req, res) => {
 
     const lead = await Lead.findOneAndUpdate(
       { _id: req.params.id, companyId: req.user.company._id },
-      { assignedTo: userIds },
+      {
+        assignedTo: userIds,
+        updatedBy: req.user._id,
+        updatedAt: new Date(),
+      },
       { new: true },
-    );
+    )
+      .populate("createdBy", "fullName email")
+      .populate("updatedBy", "fullName email")
+      .populate("assignedTo", "fullName email");
 
     if (!lead) return sendError(res, 404, "Lead not found");
 
