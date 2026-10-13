@@ -88,14 +88,29 @@ export const deleteUser = async (req, res, next) => {
 
 export const createUser = async (req, res, next) => {
   try {
-    const { fullName, email, password, role } = req.body;
+    const { fullName, email, password, role, moduleAccess } = req.body;
     const user = await UserService.createCompanyUser(
       req.user.company._id,
       req.user._id,
-      { fullName, email, password, role }
+      { fullName, email, password, role, moduleAccess }
     );
     const userCount = await User.countDocuments({ company: req.user.company._id });
     sendResponse(res, 201, true, 'User created successfully', { user, userCount });
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
+export const updateUserModuleAccess = async (req, res, next) => {
+  try {
+    const { moduleAccess } = req.body;
+    const user = await UserService.updateUserModuleAccess(
+      req.params.userId,
+      req.user.company._id,
+      req.user._id,
+      moduleAccess
+    );
+    sendResponse(res, 200, true, 'User permissions updated successfully', { user });
   } catch (error) {
     sendError(res, 400, error.message, error);
   }

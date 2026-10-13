@@ -4,14 +4,18 @@ import MetaAdAccount from "../../models/MetaAdAccount.js";
 import MetaAdCampaign from "../../models/MetaAdCampaign.js";
 import FacebookAccount from "../../models/FacebookAccount.js";
 import mongoose from "mongoose";
+import { getCompanyUserIds } from "../../utils/helpers.js";
 
 const META_API = "https://graph.facebook.com/v25.0";
 
 export const getLinkedPages = async (req, res) => {
   try {
-    const userId = req.user._id;
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
     const pages = await FacebookAccount.find({
-      userId: userId,
+      ...(companyId
+        ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+        : { userId: { $in: companyUserIds } }),
       page_id: { $exists: true, $ne: null },
     }).select("-access_token -v");
 
@@ -84,7 +88,14 @@ export const createFullCampaign = async (req, res) => {
     if (campaignObjective === "OUTCOME_LEADS" && leadForm && !isExistingPost) {
       console.log("Creating Meta Lead Generation Form...");
       
-      const pageRecord = await FacebookAccount.findOne({ page_id: pageId, userId });
+      const companyUserIds = await getCompanyUserIds(req.user);
+      const companyId = req.user?.company?._id || req.user?.company;
+      const pageRecord = await FacebookAccount.findOne({ 
+        page_id: pageId, 
+        ...(companyId
+          ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+          : { userId: { $in: companyUserIds } })
+      });
       
       if (!pageRecord || !pageRecord.access_token) {
          console.error("Page Access Token missing in DB for Page ID:", pageId);
@@ -366,9 +377,15 @@ export const createFullCampaign = async (req, res) => {
 export const getPagePosts = async (req, res) => {
   try {
     const { pageId } = req.params;
-    const userId = req.user._id;
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
 
-    const account = await FacebookAccount.findOne({ page_id: pageId, userId });
+    const account = await FacebookAccount.findOne({ 
+      page_id: pageId, 
+      ...(companyId
+        ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+        : { userId: { $in: companyUserIds } })
+    });
     if (!account) return res.status(404).json({ error: "Account not found" });
 
     const response = await axios.get(

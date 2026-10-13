@@ -11,6 +11,7 @@ export const MODULE_DEFINITIONS = Object.freeze([
   { key:"instagram_leads", label: "Instagram Leads", description: "Manage Instagram lead generation", defaultEnabled: true },
   { key:"facebook_leads", label: "Facebook Leads", description: "Manage Facebook lead generation", defaultEnabled: true },
   { key:"whatsapp_leads", label: "WhatsApp Leads", description: "Manage WhatsApp lead generation", defaultEnabled: true },
+  { key: 'calling_agent', label: 'Calling Agent', description: 'AI voice bots and automated call campaigns', defaultEnabled: true, group: 'Communication' },
   { key: 'users', label: 'Users', description: 'Team and user management', defaultEnabled: true },
   { key: 'company_settings', label: 'Company Settings', description: 'Workspace configuration', defaultEnabled: true },
   { key: 'api_keys', label: 'API Keys', description: 'API key management', defaultEnabled: true },

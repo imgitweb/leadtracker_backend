@@ -12,9 +12,16 @@ const ADMIN_ROLES = ["admin", "super_admin", "lead_manager"];
 const isAdminUser = (user) =>
   ADMIN_ROLES.includes((user?.role || "").toLowerCase());
 
+const hasFullLeadAccess = (user) => {
+  if (isAdminUser(user)) return true;
+  if (user?.moduleAccess?.leads === true) return true;
+  return false;
+};
+
 const buildLeadAccessQuery = (req) => {
-  const query = { companyId: req.user.company._id };
-  if (!isAdminUser(req.user)) {
+  const companyId = req.user?.company?._id || req.user?.company;
+  const query = { companyId };
+  if (!hasFullLeadAccess(req.user)) {
     query.$or = [{ createdBy: req.user._id }, { assignedTo: req.user._id }];
   }
 

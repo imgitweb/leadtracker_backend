@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const facebookAccountSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
   
   // ==========================================
   // Personal Profile Fields (Optional)

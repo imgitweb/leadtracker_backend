@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 const waAccountSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' },
   waba_id: { type: String, required: true }, // WhatsApp Business Account ID
   phone_number_id: { type: String, required: true, unique: true }, // Jis number se message jayega
   display_phone_number: { type: String, required: true },

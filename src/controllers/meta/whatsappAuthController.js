@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import axios from "axios";
 import WhatsAppAccount from "../../models/WhatsAppAccount.js";
+import { getCompanyUserIds } from "../../utils/helpers.js";
 dotenv.config();
 
 const APP_ID = process.env.FACEBOOK_CLIENT_ID;
@@ -38,11 +39,14 @@ export const handleWhatsAppCallback = async (req, res) => {
 
     const display_phone_number = phoneRes.data.display_phone_number;
 
+    const companyId = req.user?.company?._id || req.user?.company;
+
     // 4. Save directly to your MongoDB database
     await WhatsAppAccount.findOneAndUpdate(
       { phone_number_id: phone_number_id },
       {
         userId,
+        ...(companyId ? { company: companyId } : {}),
         waba_id: waba_id,
         display_phone_number: display_phone_number,
         access_token: accessToken
@@ -59,8 +63,12 @@ export const handleWhatsAppCallback = async (req, res) => {
 
 export const getWhatsAppStatus = async (req, res) => {
   try {
-    // 🔴 FIX: Added .select('-access_token') to exclude the token from the results
-    const accounts = await WhatsAppAccount.find({ userId: req.user._id }).select('-access_token');
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
+    const query = companyId
+      ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { userId: { $in: companyUserIds } };
+    const accounts = await WhatsAppAccount.find(query).select('-access_token');
     
     res.status(200).json({ isLinked: accounts.length > 0, accounts });
   } catch (error) {
@@ -70,7 +78,12 @@ export const getWhatsAppStatus = async (req, res) => {
 
 export const unlinkWhatsAppAccount = async (req, res) => {
   try {
-    await WhatsAppAccount.findOneAndDelete({ userId: req.user._id, phone_number_id: req.params.phone_number_id });
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
+    const query = companyId
+      ? { phone_number_id: req.params.phone_number_id, $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { phone_number_id: req.params.phone_number_id, userId: { $in: companyUserIds } };
+    await WhatsAppAccount.findOneAndDelete(query);
     res.status(200).json({ success: true });
   } catch (error) {
     res.status(500).json({ error: "Failed to unlink" });

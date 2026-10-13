@@ -8,13 +8,25 @@ const ADMIN_ROLES = ["admin", "super_admin", "lead_manager"];
 const isAdminUser = (user) =>
   ADMIN_ROLES.includes((user?.role || "").toLowerCase());
 
+const hasFullLeadAccess = (user) => {
+  if (isAdminUser(user)) return true;
+  if (user?.moduleAccess?.leads === true || user?.moduleAccess?.analytics === true) return true;
+  return false;
+};
+
 const buildLeadScopeMatch = (req, extraMatch = {}) => {
+  const companyId = req.user?.company?._id || req.user?.company;
+  const companyObjectId =
+    companyId && (companyId._bsontype === "ObjectID" || companyId instanceof mongoose.Types.ObjectId)
+      ? companyId
+      : new mongoose.Types.ObjectId(companyId);
+
   const match = {
-    companyId: req.user.company._id,
+    companyId: companyObjectId,
     ...extraMatch,
   };
 
-  if (!isAdminUser(req.user)) {
+  if (!hasFullLeadAccess(req.user)) {
     match.$or = [{ createdBy: req.user._id }, { assignedTo: req.user._id }];
   }
 
@@ -23,10 +35,13 @@ const buildLeadScopeMatch = (req, extraMatch = {}) => {
 
 export const getCompanyAnalytics = async (req, res) => {
   try {
-    const companyId = req.user.company._id;
+    const companyId = req.user?.company?._id || req.user?.company;
+    if (!companyId) {
+      return sendError(res, 400, "User is not associated with a company");
+    }
     // Ensure we have a proper ObjectId instance for aggregation matches
     const companyObjectId =
-      companyId && companyId._bsontype === "ObjectID"
+      companyId && (companyId._bsontype === "ObjectID" || companyId instanceof mongoose.Types.ObjectId)
         ? companyId
         : new mongoose.Types.ObjectId(companyId);
 
@@ -161,10 +176,10 @@ export const getCompanyAnalytics = async (req, res) => {
       const SupportTicketModel = (await import("../models/SupportTicket.js"))
         .default;
       openTickets = await SupportTicketModel.countDocuments(
-        isAdminUser(req.user)
-          ? { companyId, status: { $ne: "Closed" } }
+        hasFullLeadAccess(req.user)
+          ? { companyId: companyObjectId, status: { $ne: "Closed" } }
           : {
-              companyId,
+              companyId: companyObjectId,
               status: { $ne: "Closed" },
               $or: [{ createdBy: req.user._id }, { assignedTo: req.user._id }],
             },
