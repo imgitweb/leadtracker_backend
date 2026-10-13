@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import axios from "axios";
 import InstagramAccount from "../../models/InstagramAccount.js"; // Aapka model path
+import { getCompanyUserIds } from "../../utils/helpers.js";
 
 dotenv.config();
 
@@ -72,12 +73,12 @@ export const handleInstagramCallback = async (req, res) => {
     // ==================================================
     for (const page of pagesWithIg) {
       const igData = page.instagram_business_account;
-      const pageAccessToken = page.access_token; // 🚨 Yeh token ab PERMANENT hai
-      
+      const companyId = req.user?.company?._id || req.user?.company;
       const savedAcc = await InstagramAccount.findOneAndUpdate(
-        { instagram_user_id: igData.id, userId: userId }, 
+        { instagram_user_id: igData.id }, 
         {
           userId: userId,
+          ...(companyId ? { company: companyId } : {}),
           ig_username: igData.username,
           ig_profile_picture: igData.profile_picture_url || "",
           access_token: pageAccessToken, 
@@ -133,8 +134,12 @@ export const handleInstagramCallback = async (req, res) => {
 
 export const getInstagramStatus = async (req, res) => {
   try {
-    // 🔴 FIX: Added .select('-access_token') so DB doesn't fetch the token
-    const accounts = await InstagramAccount.find({ userId: req.user._id }).select('-access_token');
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
+    const query = companyId
+      ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { userId: { $in: companyUserIds } };
+    const accounts = await InstagramAccount.find(query).select('-access_token');
     res.status(200).json({ isLinked: accounts.length > 0, accounts });
   } catch (error) {
     console.error("Status Error:", error);
@@ -144,10 +149,12 @@ export const getInstagramStatus = async (req, res) => {
 
 export const unlinkInstagramAccount = async (req, res) => {
   try {
-    await InstagramAccount.findOneAndDelete({ 
-      userId: req.user._id, 
-      instagram_user_id: req.params.ig_id 
-    });
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
+    const query = companyId
+      ? { instagram_user_id: req.params.ig_id, $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { instagram_user_id: req.params.ig_id, userId: { $in: companyUserIds } };
+    await InstagramAccount.findOneAndDelete(query);
     res.status(200).json({ success: true, message: "Unlinked successfully" });
   } catch (error) {
     console.error("Unlink Error:", error);

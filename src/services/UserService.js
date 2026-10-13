@@ -165,7 +165,7 @@ export class UserService {
   }
 
   // Create a new user in the company (admin only)
-  static async createCompanyUser(companyId, adminUserId, { fullName, email, password, role }) {
+  static async createCompanyUser(companyId, adminUserId, { fullName, email, password, role, moduleAccess }) {
     // Validate required fields
     if (!fullName || !email || !password) {
       throw new Error('Full name, email, and password are required');
@@ -192,6 +192,23 @@ export class UserService {
       throw new Error(`Plan limit reached: Your current plan only allows up to ${company.maxUsers} users. Please upgrade your plan.`);
     }
 
+    // Prepare default or customized moduleAccess
+    const defaultModuleAccess = {
+      whatsapp: true,
+      instagram: true,
+      facebook: true,
+      calling_agent: true,
+      bulk_email: true,
+      communication_hub: true,
+      leads: true,
+      analytics: true,
+      ai_integration: true,
+    };
+
+    const finalModuleAccess = moduleAccess && typeof moduleAccess === 'object'
+      ? { ...defaultModuleAccess, ...moduleAccess }
+      : defaultModuleAccess;
+
     // Create the user
     const user = await User.create({
       fullName: fullName.trim(),
@@ -200,6 +217,7 @@ export class UserService {
       role: assignedRole,
       company: companyId,
       status: 'active',
+      moduleAccess: finalModuleAccess,
     });
 
     // Audit log
@@ -213,6 +231,56 @@ export class UserService {
     // Return without password
     const userObj = user.toJSON();
     return userObj;
+  }
+
+  // Update user module access (admin only)
+  static async updateUserModuleAccess(targetUserId, companyId, adminUserId, moduleAccessPayload) {
+    if (!moduleAccessPayload || typeof moduleAccessPayload !== 'object') {
+      throw new Error('Invalid module access payload');
+    }
+
+    const user = await User.findOne({ _id: targetUserId, company: companyId });
+    if (!user) {
+      throw new Error('User not found in your company');
+    }
+
+    const currentAccess = user.moduleAccess ? (user.moduleAccess.toObject ? user.moduleAccess.toObject() : user.moduleAccess) : {};
+    
+    // Merge new values (convert truthy / falsy booleans safely)
+    const allowedKeys = [
+      'whatsapp',
+      'instagram',
+      'facebook',
+      'calling_agent',
+      'bulk_email',
+      'communication_hub',
+      'leads',
+      'analytics',
+      'ai_integration',
+    ];
+
+    const updatedAccess = { ...currentAccess };
+    for (const key of allowedKeys) {
+      if (Object.prototype.hasOwnProperty.call(moduleAccessPayload, key)) {
+        updatedAccess[key] = Boolean(moduleAccessPayload[key]);
+      } else if (typeof updatedAccess[key] !== 'boolean') {
+        updatedAccess[key] = true;
+      }
+    }
+
+    user.moduleAccess = updatedAccess;
+    await user.save();
+
+    await AuditLog.create({
+      user: adminUserId,
+      company: companyId,
+      action: 'user_module_access_updated',
+      status: 'success',
+      changes: { after: { moduleAccess: updatedAccess } },
+      description: `Updated module permissions for ${user.fullName || user.email}`,
+    });
+
+    return user;
   }
 
   // Update user role (admin only)

@@ -1,6 +1,7 @@
 import axios from "axios";
 import dotenv from 'dotenv';
 import FacebookAccount from "../../models/FacebookAccount.js";
+import { getCompanyUserIds } from "../../utils/helpers.js";
 dotenv.config();
 
 const CLIENT_ID = process.env.FACEBOOK_CLIENT_ID;
@@ -59,11 +60,13 @@ export const handleFacebookCallback = async (req, res) => {
       for (const page of pages) {
         const picUrl = page.picture?.data?.url || "";
         const pageAccessToken = page.access_token; // Yeh token PERMANENT hai
+        const companyId = req.user?.company?._id || req.user?.company;
 
         const savedAcc = await FacebookAccount.findOneAndUpdate(
-          { page_id: page.id, userId: userId }, 
+          { page_id: page.id }, 
           {
             userId,
+            ...(companyId ? { company: companyId } : {}),
             page_id: page.id,                      
             page_name: page.name,                  
             page_profile_picture: picUrl,          
@@ -121,8 +124,12 @@ export const handleFacebookCallback = async (req, res) => {
 
 export const getFacebookStatus = async (req, res) => {
   try {
-    // 🔴 FIX: Added .select('-access_token') to exclude token from fetching
-    const accounts = await FacebookAccount.find({ userId: req.user._id }).select('-access_token');
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
+    const query = companyId
+      ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { userId: { $in: companyUserIds } };
+    const accounts = await FacebookAccount.find(query).select('-access_token');
     
     res.status(200).json({ isLinked: accounts.length > 0, accounts });
   } catch (error) {
@@ -133,7 +140,12 @@ export const getFacebookStatus = async (req, res) => {
 
 export const unlinkFacebookAccount = async (req, res) => {
   try {
-    await FacebookAccount.findOneAndDelete({ userId: req.user._id, page_id: req.params.page_id });
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
+    const query = companyId
+      ? { page_id: req.params.page_id, $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { page_id: req.params.page_id, userId: { $in: companyUserIds } };
+    await FacebookAccount.findOneAndDelete(query);
     res.status(200).json({ success: true, message: "Unlinked successfully" });
   } catch (error) {
     console.error("Unlink Error:", error);

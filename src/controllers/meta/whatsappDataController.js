@@ -5,10 +5,23 @@ import WhatsAppConversation from "../../models/WhatsAppConversation.js";
 import WhatsAppMessage from "../../models/WhatsAppMessage.js";
 import WhatsAppTemplate from "../../models/WhatsAppTemplate.js"; // Naya model import karein
 import WhatsAppCampaignLog from "../../models/WhatsAppCampaignLog.js";
+import { getCompanyUserIds } from "../../utils/helpers.js";
 import dotenv from 'dotenv';
 dotenv.config();
 
 const APP_ID = process.env.FACEBOOK_CLIENT_ID;
+
+const getCompanyWaAccount = async (req, phoneId) => {
+  const companyUserIds = await getCompanyUserIds(req.user);
+  const companyId = req.user?.company?._id || req.user?.company;
+  const query = {
+    phone_number_id: phoneId,
+    ...(companyId
+      ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { userId: { $in: companyUserIds } })
+  };
+  return WhatsAppAccount.findOne(query);
+};
 // ==========================================
 // 1. GET CONVERSATIONS
 // ==========================================
@@ -188,7 +201,7 @@ export const createWhatsAppTemplate = async (req, res) => {
     const userId = req.user._id;
 
     // 4. Get Account Details
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account || !account.waba_id) {
       return res.status(404).json({ error: "WhatsApp account or WABA ID not found." });
     }
@@ -437,10 +450,13 @@ export const createWhatsAppTemplate = async (req, res) => {
 export const getWaTemplates = async (req, res) => {
   try {
     const { phoneId } = req.params;
-    const userId = req.user._id;
+    const companyUserIds = await getCompanyUserIds(req.user);
 
     // Fetch from our DB directly for fast UI loading
-    const templates = await WhatsAppTemplate.find({ userId, phone_number_id: phoneId }).sort({ createdAt: -1 });
+    const templates = await WhatsAppTemplate.find({ 
+      phone_number_id: phoneId,
+      userId: { $in: companyUserIds }
+    }).sort({ createdAt: -1 });
     
     res.status(200).json({ success: true, templates });
   } catch (error) {
@@ -457,7 +473,7 @@ export const syncWaTemplates = async (req, res) => {
     const { phoneId } = req.params;
     const userId = req.user._id;
 
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account || !account.waba_id) {
       return res.status(404).json({ error: "WhatsApp account or WABA ID not found." });
     }
@@ -482,7 +498,7 @@ export const syncWaTemplates = async (req, res) => {
         filter: { waba_id: waba_id, name: tpl.name, language: tpl.language },
         update: {
           $set: {
-            userId,
+            userId: account.userId || userId,
             phone_number_id: phoneId,
             meta_template_id: tpl.id,
             category: tpl.category,
@@ -499,7 +515,11 @@ export const syncWaTemplates = async (req, res) => {
     }
 
     // Fetch updated templates from our DB to return to frontend
-    const updatedTemplates = await WhatsAppTemplate.find({ userId, phone_number_id: phoneId }).sort({ createdAt: -1 });
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const updatedTemplates = await WhatsAppTemplate.find({ 
+      phone_number_id: phoneId,
+      userId: { $in: companyUserIds }
+    }).sort({ createdAt: -1 });
 
     res.status(200).json({ 
       success: true, 
@@ -519,13 +539,13 @@ export const syncWaTemplates = async (req, res) => {
 export const refreshTemplateStatus = async (req, res) => {
   try {
     const { phoneId, templateId } = req.params; // templateId is the Meta template ID or DB ID
-    const userId = req.user._id;
+    const companyUserIds = await getCompanyUserIds(req.user);
 
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
 
     // Assuming frontend passes the Meta Template ID (meta_template_id)
-    const dbTemplate = await WhatsAppTemplate.findOne({ _id: templateId, userId });
+    const dbTemplate = await WhatsAppTemplate.findOne({ _id: templateId, userId: { $in: companyUserIds } });
     
     if (!dbTemplate || !dbTemplate.meta_template_id) {
        return res.status(404).json({ error: "Template not found in local database." });
@@ -586,7 +606,7 @@ export const sendBulkWaTemplate = async (req, res) => {
       return res.status(400).json({ error: "Recipients data array is mandatory." });
     }
 
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account) return res.status(404).json({ error: "WhatsApp account not found." });
 
     const template = await WhatsAppTemplate.findOne({ 
@@ -1019,16 +1039,16 @@ export const sendBulkWaTemplate = async (req, res) => {
 export const getWaTemplateAnalytics = async (req, res) => {
   try {
     const { phoneId, templateId } = req.params;
-    const userId = req.user._id;
+    const companyUserIds = await getCompanyUserIds(req.user);
 
     // 1. Get WABA ID
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account || !account.waba_id) {
       return res.status(404).json({ error: "WhatsApp account or WABA ID not found." });
     }
 
     // 2. Get Meta Template ID from your Database
-    const dbTemplate = await WhatsAppTemplate.findOne({ _id: templateId, userId });
+    const dbTemplate = await WhatsAppTemplate.findOne({ _id: templateId, userId: { $in: companyUserIds } });
     if (!dbTemplate || !dbTemplate.meta_template_id) {
        return res.status(404).json({ error: "Template not found in database." });
     }
@@ -1134,14 +1154,14 @@ export const getWaAccountInsights = async (req, res) => {
   try {
     const { phoneId } = req.params;
     let { start, end, category } = req.query; 
-    const userId = req.user._id;
+    const companyUserIds = await getCompanyUserIds(req.user);
 
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account || !account.waba_id) {
       return res.status(404).json({ error: "WhatsApp account or WABA ID not found." });
     }
 
-    const templateQuery = { userId, phone_number_id: phoneId, status: 'APPROVED' };
+    const templateQuery = { userId: { $in: companyUserIds }, phone_number_id: phoneId, status: 'APPROVED' };
     if (category && category !== 'ALL') templateQuery.category = category;
     
     const templates = await WhatsAppTemplate.find(templateQuery);
@@ -1264,9 +1284,8 @@ export const getWaAccountInsights = async (req, res) => {
 export const getWaProfileDetails = async (req, res) => {
   try {
     const { phoneId } = req.params;
-    const userId = req.user._id;
 
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account) return res.status(404).json({ error: "Account not found" });
 
     // Meta API se Profile aur Name dono ek sath fetch karein
@@ -1316,9 +1335,8 @@ export const updateWaProfileDetails = async (req, res) => {
   try {
     const { phoneId } = req.params;
     const { description, address, email, websites, about, verified_name } = req.body;
-    const userId = req.user._id;
 
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account) return res.status(404).json({ error: "Account not found" });
 
     // 1. Text details update
@@ -1391,9 +1409,8 @@ export const updateWaProfileDetails = async (req, res) => {
 export const updateWaProfilePhoto = async (req, res) => {
   try {
     const { phoneId } = req.params;
-    const userId = req.user._id;
 
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     if (!account) return res.status(404).json({ error: "Account not found" });
 
     if (!req.file) return res.status(400).json({ error: "Please upload an image file." });
@@ -1479,7 +1496,7 @@ export const updateTemplatePurpose = async (req, res) => {
   try {
     const { templateId } = req.params;
     const { purpose } = req.body;
-    const userId = req.user._id;
+    const companyUserIds = await getCompanyUserIds(req.user);
     console.log("hit - - - - - - - - -- - - - - -")
 
     // Validation
@@ -1493,7 +1510,7 @@ export const updateTemplatePurpose = async (req, res) => {
 
     // Find template and update only the purpose field
     const updatedTemplate = await WhatsAppTemplate.findOneAndUpdate(
-      { _id: templateId, userId: userId }, // Ensure user owns the template
+      { _id: templateId, userId: { $in: companyUserIds } }, // Ensure company owns the template
       { $set: { purpose: purpose.trim() } },
       { new: true } // Returns the updated document
     );
@@ -1521,17 +1538,17 @@ export const updateTemplatePurpose = async (req, res) => {
 export const deleteWhatsAppTemplate = async (req, res) => {
   try {
     const { phoneId, id } = req.params; // 'id' is your local MongoDB _id for the template
-    const userId = req.user._id;
+    const companyUserIds = await getCompanyUserIds(req.user);
 
     // 1. Find the template in local Database first to get its 'name'
-    const template = await WhatsAppTemplate.findOne({ _id: id, phone_number_id: phoneId, userId });
+    const template = await WhatsAppTemplate.findOne({ _id: id, phone_number_id: phoneId, userId: { $in: companyUserIds } });
     
     if (!template) {
       return res.status(404).json({ error: "Template not found in local database." });
     }
 
     // 2. Get the WhatsApp Account to retrieve the access token and WABA ID
-    const account = await WhatsAppAccount.findOne({ userId, phone_number_id: phoneId });
+    const account = await getCompanyWaAccount(req, phoneId);
     
     if (!account || !account.waba_id) {
       return res.status(404).json({ error: "WhatsApp account or WABA ID not found." });
@@ -1565,7 +1582,7 @@ export const deleteWhatsAppTemplate = async (req, res) => {
 
     // 4. Delete from local MongoDB
     // Since Meta deletes ALL templates with this name, it's best practice to delete all local copies with this name
-    await WhatsAppTemplate.deleteMany({ phone_number_id: phoneId, name: templateName, userId });
+    await WhatsAppTemplate.deleteMany({ phone_number_id: phoneId, name: templateName, userId: { $in: companyUserIds } });
 
     res.status(200).json({ 
       success: true, 

@@ -2,12 +2,13 @@ import StartupData from "../models/StartupData.js";
 import InstagramAccount from "../models/InstagramAccount.js";
 import FacebookAccount from "../models/FacebookAccount.js"; 
 import WhatsAppAccount from "../models/WhatsAppAccount.js";
+import { getCompanyUserIds } from "../utils/helpers.js";
 
 // 1. Get User's Startup Data
 export const getStartupData = async (req, res) => {
   try {
-    const userId = req.user._id || req.user.id;
-    const startupData = await StartupData.findOne({ userId });
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const startupData = await StartupData.findOne({ userId: { $in: companyUserIds } });
     res.status(200).json({ success: true, startupData });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch startup data" });
@@ -81,26 +82,31 @@ export const saveStartupData = async (req, res) => {
 // 3. Toggle AI for a specific platform account
 export const toggleAIStatus = async (req, res) => {
   try {
-    const userId = req.user._id || req.user.id;
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
     const { accountId, platform, isEnabled } = req.body;
+
+    const userOrCompany = companyId
+      ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { userId: { $in: companyUserIds } };
 
     let updatedAccount;
 
     if (platform === 'instagram') {
       updatedAccount = await InstagramAccount.findOneAndUpdate(
-        { instagram_user_id: accountId, userId },
+        { instagram_user_id: accountId, ...userOrCompany },
         { ai_enabled: isEnabled },
         { returnDocument: 'after' } // Updated for Mongoose compatibility
       );
     } else if (platform === 'facebook') {
       updatedAccount = await FacebookAccount.findOneAndUpdate(
-        { page_id: accountId, userId },
+        { page_id: accountId, ...userOrCompany },
         { ai_enabled: isEnabled },
         { returnDocument: 'after' }
       );
     } else if (platform === 'whatsapp') {
       updatedAccount = await WhatsAppAccount.findOneAndUpdate(
-        { phone_number_id: accountId, userId },
+        { phone_number_id: accountId, ...userOrCompany },
         { ai_enabled: isEnabled },
         { returnDocument: 'after' }
       );
@@ -116,6 +122,8 @@ export const toggleAIStatus = async (req, res) => {
 
 export const setupAIAutoReply = async (req, res) => {
   try {
+    const companyUserIds = await getCompanyUserIds(req.user);
+    const companyId = req.user?.company?._id || req.user?.company;
     const userId = req.user.id || req.user._id; 
     
     // 🔥 customPrompt ko req.body me add kar diya hai
@@ -136,7 +144,7 @@ export const setupAIAutoReply = async (req, res) => {
       return res.status(400).json({ error: "Account ID and Business Name are required." });
     }
 
-    let startupData = await StartupData.findOne({ userId });
+    let startupData = await StartupData.findOne({ userId: { $in: companyUserIds } });
     
     if (!startupData) {
       // Naya record banate waqt customPrompt save hoga
@@ -149,7 +157,7 @@ export const setupAIAutoReply = async (req, res) => {
         contactPhone, 
         description, 
         faq, 
-        tone,
+        tone, 
         customPrompt
       });
     } else {
@@ -167,8 +175,12 @@ export const setupAIAutoReply = async (req, res) => {
     
     await startupData.save();
 
+    const userOrCompany = companyId
+      ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+      : { userId: { $in: companyUserIds } };
+
     await InstagramAccount.findOneAndUpdate(
-      { instagram_user_id: accountId, userId: userId },
+      { instagram_user_id: accountId, ...userOrCompany },
       { ai_enabled: true },
       { returnDocument: 'after' }
     );

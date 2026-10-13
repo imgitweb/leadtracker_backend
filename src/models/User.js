@@ -40,6 +40,17 @@ const userSchema = new mongoose.Schema(
       ref: 'Company',
       required: true,
     },
+    moduleAccess: {
+      whatsapp: { type: Boolean, default: true },
+      instagram: { type: Boolean, default: true },
+      facebook: { type: Boolean, default: true },
+      calling_agent: { type: Boolean, default: true },
+      bulk_email: { type: Boolean, default: true },
+      communication_hub: { type: Boolean, default: true },
+      leads: { type: Boolean, default: true },
+      analytics: { type: Boolean, default: true },
+      ai_integration: { type: Boolean, default: true },
+    },
 
     phone: {
       type: String,

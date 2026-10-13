@@ -9,6 +9,7 @@ import {
   createUser,
   updateUserRole,
   updateUserStatus,
+  updateUserModuleAccess,
 } from "../controllers/userController.js";
 import { protect, authorize } from "../middleware/auth.js";
 import { uploadAvatar as uploadAvatarMiddleware } from "../config/multer.js";
@@ -35,6 +36,11 @@ router.post(
   createUser,
 );
 router.put("/:userId/role", authorize("admin", "super_admin"), updateUserRole);
+router.put(
+  "/:userId/module-access",
+  authorize("admin", "super_admin"),
+  updateUserModuleAccess
+);
 router.put(
   "/:userId/status",
   authorize("admin", "super_admin"),

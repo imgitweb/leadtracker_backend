@@ -4,6 +4,7 @@ const instagramAccountSchema = new mongoose.Schema(
   {
     // Aapke main User system ki ID (Link karne ke liye)
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, 
+    company: { type: mongoose.Schema.Types.ObjectId, ref: 'Company' }, 
     
     instagram_user_id: { type: String, required: true, unique: true },
     ig_username: { type: String },           // Instagram Username

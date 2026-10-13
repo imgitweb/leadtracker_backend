@@ -5,6 +5,7 @@ import MetaAdAccount from "../../models/MetaAdAccount.js";
 import MetaAdSet from "../../models/metaAdsetsModel.js";
 import MetaAd from "../../models/metaAds.js";
 import FacebookAccount from "../../models/FacebookAccount.js"; // Required for Lead Forms page token
+import { getCompanyUserIds } from "../../utils/helpers.js";
 
 const META_API = `https://graph.facebook.com/v25.0`;
 
@@ -346,7 +347,14 @@ export const createAd = async (req, res) => {
     // --- CREATE LEAD GENERATION FORM ---
     let leadFormId = null;
     if (campaignObjective === "OUTCOME_LEADS" && leadForm && !isExistingPost) {
-      const pageRecord = await FacebookAccount.findOne({ page_id: pageId, userId });
+      const companyUserIds = await getCompanyUserIds(req.user);
+      const companyId = req.user?.company?._id || req.user?.company;
+      const pageRecord = await FacebookAccount.findOne({ 
+        page_id: pageId, 
+        ...(companyId
+          ? { $or: [{ userId: { $in: companyUserIds } }, { company: companyId }] }
+          : { userId: { $in: companyUserIds } })
+      });
       if (!pageRecord || !pageRecord.access_token) {
          return res.status(400).json({ error: "Page Access Token is missing." });
       }
