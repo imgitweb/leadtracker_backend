@@ -25,9 +25,23 @@ const getCompanyWaAccount = async (req, phoneId) => {
 // ==========================================
 // 1. GET CONVERSATIONS
 // ==========================================
+// ==========================================
+// 1. GET CONVERSATIONS
+// ==========================================
 export const getWaConversations = async (req, res) => {
   try {
-    const conversations = await WhatsAppConversation.find({ phone_number_id: req.params.phoneId }).sort({ last_message_time: -1 });
+    const { phone } = req.query;
+    let query = { phone_number_id: req.params.phoneId };
+    if (phone) {
+      const cleanPhone = String(phone).replace(/[^0-9]/g, '');
+      const last10 = cleanPhone.slice(-10);
+      if (last10.length >= 10) {
+        query.customer_phone = { $regex: last10 + '$' };
+      } else if (cleanPhone) {
+        query.customer_phone = cleanPhone;
+      }
+    }
+    const conversations = await WhatsAppConversation.find(query).sort({ last_message_time: -1 });
     res.status(200).json({ conversations });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch conversations" });
@@ -52,43 +66,76 @@ export const getWaMessages = async (req, res) => {
 export const sendWaMessage = async (req, res) => {
   try {
     const { phoneId } = req.params;
-    const { customer_phone, text, conversationId } = req.body;
+    const { customer_phone, text, conversationId, customer_name } = req.body;
 
     const account = await WhatsAppAccount.findOne({ phone_number_id: phoneId });
     if (!account) return res.status(404).json({ error: "Account not found" });
+
+    // Clean phone number
+    let cleanCustomerPhone = String(customer_phone || '').replace(/[^0-9]/g, '');
+    if (cleanCustomerPhone.length === 10) {
+      cleanCustomerPhone = '91' + cleanCustomerPhone;
+    }
     
     // WhatsApp Cloud API Messaging Endpoint
     const response = await axios.post(
       `https://graph.facebook.com/v25.0/${phoneId}/messages`,
       {
         messaging_product: "whatsapp",
-        to: customer_phone,
+        to: cleanCustomerPhone,
         type: "text",
         text: { body: text }
       },
       { headers: { Authorization: `Bearer ${account.access_token}`, "Content-Type": "application/json" } }
     );
 
-    // 🔥 FIX: Response se message_id nikalna aur save karna
     const messageId = response.data?.messages?.[0]?.id;
 
+    // Locate or create conversation if conversationId is not provided
+    let targetConv = null;
+    if (conversationId) {
+      targetConv = await WhatsAppConversation.findById(conversationId);
+    }
+    if (!targetConv) {
+      targetConv = await WhatsAppConversation.findOne({
+        phone_number_id: phoneId,
+        $or: [
+          { customer_phone: cleanCustomerPhone },
+          { customer_phone: cleanCustomerPhone.slice(-10) }
+        ]
+      });
+    }
+    if (!targetConv) {
+      targetConv = await WhatsAppConversation.create({
+        phone_number_id: phoneId,
+        customer_phone: cleanCustomerPhone,
+        customer_name: customer_name || "Customer",
+        last_message: text,
+        last_message_time: new Date()
+      });
+    }
+
     const newMessage = new WhatsAppMessage({
-      conversation_id: conversationId, 
-      message_id: messageId,        // <-- Added this
+      conversation_id: targetConv._id, 
+      message_id: messageId,
       sender_id: phoneId, 
-      receiver_id: customer_phone, 
+      receiver_id: cleanCustomerPhone, 
       text, 
       is_from_me: true,
-      status: "sent"                // <-- Added this
+      status: "sent"
     });
     await newMessage.save();
 
-    await WhatsAppConversation.findByIdAndUpdate(conversationId, { last_message: text, last_message_time: new Date() });
+    await WhatsAppConversation.findByIdAndUpdate(targetConv._id, {
+      last_message: text,
+      last_message_time: new Date()
+    });
 
-    res.status(200).json({ message: newMessage });
+    res.status(200).json({ message: newMessage, conversation: targetConv });
   } catch (error) {
     console.error("WA Send Error:", error.response?.data || error);
-    res.status(500).json({ error: "Failed to send WA message" });
+    const metaError = error.response?.data?.error?.message || error.response?.data?.error?.error_user_msg || error.message;
+    res.status(500).json({ error: metaError || "Failed to send WA message" });
   }
 };
 
@@ -599,7 +646,7 @@ export const sendBulkWaTemplate = async (req, res) => {
   try {
     console.log("--- Bulk Campaign Hit ---");
     const { phoneId } = req.params;
-    const { templateName, language, recipients, headerMedia } = req.body;
+    const { templateName, language, recipients, headerMedia, headerFileName } = req.body;
     const userId = req.user?._id;
 
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
@@ -638,10 +685,30 @@ export const sendBulkWaTemplate = async (req, res) => {
 
         if (buffer) {
           const form = new FormData();
-          const fileExtension = mimeType.split('/')[1] || 'jpg';
-          const fileType = mimeType.split('/')[0] || 'image'; // image, video, or document
+
+          // Properly map MIME type to Meta allowed types: 'image', 'video', 'document', or 'audio'
+          let fileType = 'image';
+          if (mimeType.startsWith('video/')) {
+            fileType = 'video';
+          } else if (mimeType.startsWith('image/')) {
+            fileType = 'image';
+          } else if (mimeType.startsWith('audio/')) {
+            fileType = 'audio';
+          } else {
+            // PDF, documents, spreadsheets, text
+            fileType = 'document';
+          }
+
+          let fileExtension = mimeType.split('/')[1] || 'bin';
+          if (fileExtension.includes(';')) fileExtension = fileExtension.split(';')[0];
+          if (fileExtension.includes('+')) fileExtension = fileExtension.split('+')[0];
+          if (fileType === 'document' && (mimeType.includes('pdf') || fileExtension === 'pdf')) {
+            fileExtension = 'pdf';
+          }
+
+          const originalFileName = headerFileName || `header_${fileType}.${fileExtension}`;
           
-          form.append('file', buffer, { filename: `header_media.${fileExtension}`, contentType: mimeType });
+          form.append('file', buffer, { filename: originalFileName, contentType: mimeType });
           form.append('type', fileType);
           form.append('messaging_product', 'whatsapp');
 
@@ -653,7 +720,9 @@ export const sendBulkWaTemplate = async (req, res) => {
                 ...form.getHeaders(),
                 Authorization: `Bearer ${account.access_token}`
               },
-              maxBodyLength: Infinity // 🔥 CRITICAL FIX: Required for uploading buffers in Axios
+              maxBodyLength: Infinity,
+              maxContentLength: Infinity,
+              timeout: 60000
             }
           );
           uploadedMediaId = uploadRes.data.id;
@@ -713,10 +782,14 @@ export const sendBulkWaTemplate = async (req, res) => {
           
           if (uploadedMediaId) {
             headerParams[mediaType].id = uploadedMediaId;
+            if (mediaType === 'document') {
+              headerParams[mediaType].filename = headerFileName || "document.pdf";
+            }
           } else if (defaultMediaLink) {
             headerParams[mediaType].link = defaultMediaLink;
-            // Note: If defaultMediaLink is an internal 'scontent.whatsapp.net' link, 
-            // Meta may reject it. You MUST upload a new image if Meta blocks the default.
+            if (mediaType === 'document') {
+              headerParams[mediaType].filename = headerFileName || "document.pdf";
+            }
           }
 
           if (headerParams[mediaType].id || headerParams[mediaType].link) {
