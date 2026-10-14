@@ -120,6 +120,10 @@ const auditLogSchema = new mongoose.Schema(
       default: 'success',
     },
     description: String,
+    details: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
   },
   {
     timestamps: true,
@@ -130,6 +134,7 @@ const auditLogSchema = new mongoose.Schema(
 auditLogSchema.index({ user: 1, company: 1, createdAt: -1 });
 auditLogSchema.index({ action: 1 });
 auditLogSchema.index({ company: 1, createdAt: -1 });
+auditLogSchema.index({ 'details.leadId': 1 });
 
 const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 export default AuditLog;
