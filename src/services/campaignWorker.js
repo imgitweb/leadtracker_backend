@@ -144,14 +144,16 @@ const campaignWorker = async () => {
   }
 };
 
+// /* ─── OLD EXOTEL CAMPAIGN WORKER COMMENTED OUT ───
 // Run every 3 seconds
-setInterval(campaignWorker, WORKER_INTERVAL);
+// setInterval(campaignWorker, WORKER_INTERVAL);
 
 // Initial Start
-setTimeout(() => {
-  campaignWorker();
-}, 5000);
+// setTimeout(() => {
+//   campaignWorker();
+// }, 5000);
 
-console.log("✅ Exotel Campaign Worker Started (parallel batch mode)");
+// console.log("✅ Exotel Campaign Worker Started (parallel batch mode)");
+// ──────────────────────────────────────────────────────── */
 
 export default campaignWorker;

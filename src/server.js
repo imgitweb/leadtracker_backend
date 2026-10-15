@@ -58,11 +58,20 @@ import metaCampaignsRoutes from "./routes/meta/metaAdsCampaignRoutes.js";
 import webhookRoutes from "./routes/meta/webhookRoutes.js";
 
 
-import campaignRoutes from "./routes/campaignRoutes.js";
-import "./services/campaignWorker.js";
-import exotelWebhookRoutes from "./routes/exotelWebhook.js";
+/* ─── OLD EXOTEL CALLING AGENT IMPORTS (COMMENTED OUT) ───
+// import campaignRoutes from "./routes/campaignRoutes.js";
+// import "./services/campaignWorker.js";
+// import exotelWebhookRoutes from "./routes/exotelWebhook.js";
+// import { handleExotelStream } from "./controllers/streamController.js";
+──────────────────────────────────────────────────────── */
 
-import { handleExotelStream } from "./controllers/streamController.js";
+// ── AI Twilio Calling Campaign Management Routes ──
+import twilioRoutes from "./routes/twilioRoutes.js";
+import campaignRoutes from "./routes/campaignRoutes.js";
+import callingContactRoutes from "./routes/contactRoutes.js";
+import callRoutes from "./routes/callRoutes.js";
+import callingAnalyticsRoutes from "./routes/callingAnalyticsRoutes.js";
+import { startCallingQueueWorker } from "./services/callingQueueService.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -122,8 +131,8 @@ app.use(
 
 app.use(morgan("combined"));
 app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ limit: "10mb", extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ limit: "50mb", extended: true }));
 app.use(cookieParser(process.env.SESSION_SECRET));
 
 app.use(
@@ -187,16 +196,18 @@ app.use("/api/meta-ads", metaAdsAuthRoutes);
 app.use("/api/meta-campaigns", metaCampaignsRoutes);
 app.use("/api/bulk-email", bulkMailRoutes);
 
-// ── AI Calling Agent Routes ───────────────────────────────────────
-// NOTE: mounted at root, NOT "/api/campaigns" — campaignRoutes.js
-// already defines its own full paths ("/campaigns", "/api/campaigns/create",
-// etc.) to match what the frontend (CallCampaign.jsx) calls directly.
-// Mounting it under "/api/campaigns" here would double-prefix every
-// route (e.g. "/api/campaigns/api/campaigns/create") and break the UI.
-app.use(campaignRoutes);
-
-app.use("/api/exotel/webhook", exotelWebhookRoutes);
+// ── AI Twilio Calling Campaign Management Routes ───────────────────
+app.use("/api/twilio", twilioRoutes);
+app.use("/api/campaigns", campaignRoutes);
+app.use("/api/contacts", callingContactRoutes);
+app.use("/api/calls", callRoutes);
+app.use("/api/calling-analytics", callingAnalyticsRoutes);
 // ─────────────────────────────────────────────────────────────────
+
+/* ─── OLD EXOTEL CALLING AGENT ROUTES (COMMENTED OUT) ───
+// app.use(campaignRoutes);
+// app.use("/api/exotel/webhook", exotelWebhookRoutes);
+──────────────────────────────────────────────────────── */
 
 app.use(notFound);
 app.use(errorHandler);
@@ -209,21 +220,23 @@ io.on("connection", (socket) => {
   });
 });
 
-// ============ WEBSOCKET — EXOTEL VOICE STREAM ============
-const wss = new WebSocketServer({ server, path: "/media-stream" });
-
-wss.on("connection", (ws, req) => {
-  console.log("✅ Exotel WebSocket connected at:", req.url);
-  handleExotelStream(ws);
-});
-
-wss.on("error", (error) => {
-  console.error("❌ WebSocket Server Error:", error.message);
-});
+/* ─── OLD EXOTEL WEBSOCKET STREAM (COMMENTED OUT) ───
+// const wss = new WebSocketServer({ server, path: "/media-stream" });
+// wss.on("connection", (ws, req) => {
+//   console.log("✅ Exotel WebSocket connected at:", req.url);
+//   handleExotelStream(ws);
+// });
+// wss.on("error", (error) => {
+//   console.error("❌ WebSocket Server Error:", error.message);
+// });
+───────────────────────────────────────────────────── */
 
 server.on("upgrade", (req) => {
   console.log("🔁 Upgrade request received:", req.url);
 });
+
+// Start AI calling queue worker
+startCallingQueueWorker(io);
 
 // ============ START SERVER ============
 

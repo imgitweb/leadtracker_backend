@@ -25,9 +25,6 @@ const getCompanyWaAccount = async (req, phoneId) => {
 // ==========================================
 // 1. GET CONVERSATIONS
 // ==========================================
-// ==========================================
-// 1. GET CONVERSATIONS
-// ==========================================
 export const getWaConversations = async (req, res) => {
   try {
     const { phone } = req.query;
@@ -664,78 +661,124 @@ export const sendBulkWaTemplate = async (req, res) => {
     if (!template) return res.status(404).json({ error: "Template not found." });
 
     // ---------------------------------------------------------
-    // 1. Handle Header Media Upload (Only ONCE per campaign)
+    // 1. Analyze Template Requirements Safely
+    // ---------------------------------------------------------
+    const tplHeader = template.components?.find(c => c.type?.toUpperCase() === "HEADER");
+    const headerFormat = tplHeader?.format?.toUpperCase(); // IMAGE, VIDEO, DOCUMENT, TEXT
+    const requiresMediaHeader = ["IMAGE", "DOCUMENT", "VIDEO"].includes(headerFormat);
+    const defaultMediaLink = tplHeader?.example?.header_handle?.[0] || null;
+    const validDefaultUrl = defaultMediaLink && (defaultMediaLink.startsWith('http://') || defaultMediaLink.startsWith('https://')) ? defaultMediaLink : null;
+
+    // Determine exact body variables required by the template
+    const bodyComp = template.components?.find(c => c.type?.toUpperCase() === "BODY");
+    const bodyText = bodyComp?.text || "";
+    const bodyVarMatches = bodyText.match(/\{\{\d+\}\}/g) || [];
+    const uniqueBodyVarsCount = new Set(bodyVarMatches.map(v => v.match(/\d+/)[0])).size;
+
+    // ---------------------------------------------------------
+    // 2. Handle Header Media Upload (Only ONCE per campaign)
     // ---------------------------------------------------------
     let uploadedMediaId = null;
+    let directMediaUrl = null;
+    let resolvedFileName = headerFileName || '';
+
     if (headerMedia) {
-      try {
-        let buffer;
-        let mimeType = 'image/jpeg'; // Default fallback
+      if (typeof headerMedia === 'string' && (headerMedia.startsWith('http://') || headerMedia.startsWith('https://'))) {
+        directMediaUrl = headerMedia;
+      } else {
+        try {
+          let buffer;
+          let mimeType = '';
 
-        // Safely extract Base64 whether it has a data URI prefix or not
-        if (headerMedia.startsWith('data:')) {
-          const matches = headerMedia.match(/^data:(.+);base64,(.+)$/);
-          if (matches && matches.length === 3) {
-            mimeType = matches[1];
-            buffer = Buffer.from(matches[2], 'base64');
-          }
-        } else {
-          buffer = Buffer.from(headerMedia, 'base64');
-        }
-
-        if (buffer) {
-          const form = new FormData();
-
-          // Properly map MIME type to Meta allowed types: 'image', 'video', 'document', or 'audio'
-          let fileType = 'image';
-          if (mimeType.startsWith('video/')) {
-            fileType = 'video';
-          } else if (mimeType.startsWith('image/')) {
-            fileType = 'image';
-          } else if (mimeType.startsWith('audio/')) {
-            fileType = 'audio';
-          } else {
-            // PDF, documents, spreadsheets, text
-            fileType = 'document';
-          }
-
-          let fileExtension = mimeType.split('/')[1] || 'bin';
-          if (fileExtension.includes(';')) fileExtension = fileExtension.split(';')[0];
-          if (fileExtension.includes('+')) fileExtension = fileExtension.split('+')[0];
-          if (fileType === 'document' && (mimeType.includes('pdf') || fileExtension === 'pdf')) {
-            fileExtension = 'pdf';
-          }
-
-          const originalFileName = headerFileName || `header_${fileType}.${fileExtension}`;
-          
-          form.append('file', buffer, { filename: originalFileName, contentType: mimeType });
-          form.append('type', fileType);
-          form.append('messaging_product', 'whatsapp');
-
-          const uploadRes = await axios.post(
-            `https://graph.facebook.com/v25.0/${phoneId}/media`,
-            form,
-            {
-              headers: {
-                ...form.getHeaders(),
-                Authorization: `Bearer ${account.access_token}`
-              },
-              maxBodyLength: Infinity,
-              maxContentLength: Infinity,
-              timeout: 60000
+          // Safely extract Base64 whether it has a data URI prefix or not
+          if (typeof headerMedia === 'string' && headerMedia.startsWith('data:')) {
+            const matches = headerMedia.match(/^data:(.+);base64,(.+)$/);
+            if (matches && matches.length === 3) {
+              const rawMime = matches[1].split(';')[0];
+              mimeType = rawMime.trim().toLowerCase();
+              buffer = Buffer.from(matches[2], 'base64');
             }
-          );
-          uploadedMediaId = uploadRes.data.id;
-          console.log("Media uploaded successfully. Media ID:", uploadedMediaId);
+          } else if (typeof headerMedia === 'string') {
+            buffer = Buffer.from(headerMedia, 'base64');
+          }
+
+          // Fallback / Auto-Correction based on template headerFormat & headerFileName
+          const ext = (headerFileName || '').split('.').pop().toLowerCase();
+          if (!mimeType) {
+            if (ext === 'pdf') mimeType = 'application/pdf';
+            else if (ext === 'mp4') mimeType = 'video/mp4';
+            else if (ext === '3gp' || ext === '3gpp') mimeType = 'video/3gpp';
+            else if (ext === 'png') mimeType = 'image/png';
+            else if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+            else if (headerFormat === 'VIDEO') mimeType = 'video/mp4';
+            else if (headerFormat === 'DOCUMENT') mimeType = 'application/pdf';
+            else mimeType = 'image/jpeg';
+          }
+
+          // Ensure correct MIME family according to Meta template requirements
+          if (headerFormat === 'VIDEO' && !mimeType.startsWith('video/')) {
+            mimeType = 'video/mp4';
+          } else if (headerFormat === 'DOCUMENT' && (mimeType.startsWith('image/') || mimeType === 'application/octet-stream')) {
+            mimeType = 'application/pdf';
+          } else if (headerFormat === 'IMAGE' && !mimeType.startsWith('image/')) {
+            mimeType = 'image/jpeg';
+          }
+
+          // Determine clean filename with extension
+          if (!resolvedFileName) {
+            if (headerFormat === 'DOCUMENT') resolvedFileName = `document_${Date.now()}.pdf`;
+            else if (headerFormat === 'VIDEO') resolvedFileName = `video_${Date.now()}.mp4`;
+            else resolvedFileName = `image_${Date.now()}.jpg`;
+          } else {
+            if (headerFormat === 'DOCUMENT' && !resolvedFileName.includes('.')) resolvedFileName += '.pdf';
+            else if (headerFormat === 'VIDEO' && !resolvedFileName.includes('.')) resolvedFileName += '.mp4';
+            else if (headerFormat === 'IMAGE' && !resolvedFileName.includes('.')) resolvedFileName += '.jpg';
+          }
+
+          if (buffer) {
+            const form = new FormData();
+            form.append('messaging_product', 'whatsapp');
+            form.append('file', buffer, { filename: resolvedFileName, contentType: mimeType });
+            // Meta API requires valid MIME type string (e.g. video/mp4, application/pdf, image/jpeg)
+            form.append('type', mimeType);
+
+            const uploadRes = await axios.post(
+              `https://graph.facebook.com/v25.0/${phoneId}/media`,
+              form,
+              {
+                headers: {
+                  ...form.getHeaders(),
+                  Authorization: `Bearer ${account.access_token}`
+                },
+                maxBodyLength: Infinity,
+                maxContentLength: Infinity,
+                timeout: 120000 // 2 minutes for video & large PDF uploads
+              }
+            );
+            uploadedMediaId = uploadRes.data.id;
+            console.log(`✅ Media (${mimeType}) uploaded successfully to Meta. Media ID:`, uploadedMediaId);
+          }
+        } catch (uploadErr) {
+          const errorDetail = uploadErr.response?.data?.error?.message || uploadErr.message;
+          console.error("Media upload error:", JSON.stringify(uploadErr.response?.data || uploadErr.message));
+          return res.status(400).json({ error: `Failed to upload header ${headerFormat || 'media'} to Meta: ${errorDetail}` });
         }
-      } catch (uploadErr) {
-        console.error("Media upload error:", uploadErr.response?.data || uploadErr.message);
-        return res.status(400).json({ error: "Failed to upload header media to Meta. Ensure the file is valid." });
       }
     }
 
+    if (!resolvedFileName) {
+      resolvedFileName = headerFormat === 'DOCUMENT' ? 'document.pdf' : headerFormat === 'VIDEO' ? 'video.mp4' : 'image.jpg';
+    }
+
+    // Safety validation: if template requires media header, ensure we have an ID or valid HTTP link
+    if (requiresMediaHeader && !uploadedMediaId && !directMediaUrl && !validDefaultUrl) {
+      return res.status(400).json({
+        error: `This template requires a ${headerFormat} header attachment. Please upload a ${headerFormat.toLowerCase()} file.`
+      });
+    }
+
     // ---------------------------------------------------------
-    // 2. Normalize Phones & Remove Duplicates
+    // 3. Normalize Phones & Remove Duplicates
     // ---------------------------------------------------------
     const uniqueRecipientsMap = new Map();
     for (const rec of recipients) {
@@ -754,20 +797,6 @@ export const sendBulkWaTemplate = async (req, res) => {
     const deliveryDetails = [];
 
     // ---------------------------------------------------------
-    // 3. Analyze Template Requirements Safely
-    // ---------------------------------------------------------
-    const tplHeader = template.components?.find(c => c.type?.toUpperCase() === "HEADER");
-    const headerFormat = tplHeader?.format?.toUpperCase(); // IMAGE, VIDEO, DOCUMENT
-    const requiresMediaHeader = ["IMAGE", "DOCUMENT", "VIDEO"].includes(headerFormat);
-    const defaultMediaLink = tplHeader?.example?.header_handle?.[0] || null;
-
-    // Determine exact body variables required by the template
-    const bodyComp = template.components?.find(c => c.type?.toUpperCase() === "BODY");
-    const bodyText = bodyComp?.text || "";
-    const bodyVarMatches = bodyText.match(/\{\{\d+\}\}/g) || [];
-    const uniqueBodyVarsCount = new Set(bodyVarMatches.map(v => v.match(/\d+/)[0])).size;
-
-    // ---------------------------------------------------------
     // 4. Send Messages
     // ---------------------------------------------------------
     for (const rec of uniqueRecipients) {
@@ -783,12 +812,17 @@ export const sendBulkWaTemplate = async (req, res) => {
           if (uploadedMediaId) {
             headerParams[mediaType].id = uploadedMediaId;
             if (mediaType === 'document') {
-              headerParams[mediaType].filename = headerFileName || "document.pdf";
+              headerParams[mediaType].filename = resolvedFileName;
             }
-          } else if (defaultMediaLink) {
-            headerParams[mediaType].link = defaultMediaLink;
+          } else if (directMediaUrl) {
+            headerParams[mediaType].link = directMediaUrl;
             if (mediaType === 'document') {
-              headerParams[mediaType].filename = headerFileName || "document.pdf";
+              headerParams[mediaType].filename = resolvedFileName;
+            }
+          } else if (validDefaultUrl) {
+            headerParams[mediaType].link = validDefaultUrl;
+            if (mediaType === 'document') {
+              headerParams[mediaType].filename = resolvedFileName;
             }
           }
 
