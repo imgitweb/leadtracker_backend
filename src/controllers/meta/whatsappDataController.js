@@ -39,7 +39,20 @@ export const getWaConversations = async (req, res) => {
       }
     }
     const conversations = await WhatsAppConversation.find(query).sort({ last_message_time: -1 });
-    res.status(200).json({ conversations });
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const todayActiveCount = await WhatsAppConversation.countDocuments({
+      phone_number_id: req.params.phoneId,
+      last_message_time: { $gte: startOfToday }
+    });
+
+    res.status(200).json({ 
+      conversations,
+      totalCount: conversations.length,
+      todayActiveCount
+    });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch conversations" });
   }

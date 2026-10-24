@@ -68,6 +68,9 @@ export const getCompanyAnalytics = async (req, res) => {
     const inConversation = await Lead.countDocuments(
       buildLeadScopeMatch(req, { status: "Contacted" }),
     );
+    const notConnectedLeads = await Lead.countDocuments(
+      buildLeadScopeMatch(req, { status: "Not Connected" }),
+    );
     const convertedLeads = await Lead.countDocuments(
       buildLeadScopeMatch(req, { status: "Converted" }),
     );
@@ -200,6 +203,7 @@ export const getCompanyAnalytics = async (req, res) => {
       qualifiedLeads,
       openCases,
       inConversation,
+      notConnectedLeads,
       convertedLeads,
       lostLeads,
 

@@ -784,6 +784,7 @@ export class SuperAdminService {
       leadStatusBreakdown: {
         New: statusMap['New'] || 0,
         Contacted: statusMap['Contacted'] || 0,
+        'Not Connected': statusMap['Not Connected'] || 0,
         Qualified: statusMap['Qualified'] || 0,
         Converted: statusMap['Converted'] || 0,
         Lost: statusMap['Lost'] || 0,
