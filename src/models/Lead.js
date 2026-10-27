@@ -49,11 +49,14 @@ const leadSchema = new mongoose.Schema(
     // 🔍 Extracted Fields (Search Optimization)
     name: {
       type: String,
+      trim: true,
       index: true
     },
 
     email: {
       type: String,
+      trim: true,
+      default: "",
       index: true
     },
 
