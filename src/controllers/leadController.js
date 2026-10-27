@@ -178,6 +178,11 @@ export const getLeads = async (req, res) => {
 // Create a new lead
 export const createLead = async (req, res) => {
   try {
+    // If bulk payload is posted to /api/contact, delegate to bulkCreateLeads
+    if (Array.isArray(req.body) || Array.isArray(req.body?.leads)) {
+      return bulkCreateLeads(req, res);
+    }
+
     const company = await Company.findById(req.user.company._id);
     if (!company) {
       return sendError(res, 404, "Company not found");
@@ -262,6 +267,16 @@ export const createLead = async (req, res) => {
       return foundKey ? normalizedData[foundKey] : null;
     };
 
+    const rawName = findValue(["name", "full name", "fullname", "username"]);
+    const rawEmail = findValue(["email", "email address", "mail"]);
+    const rawPhone = findValue([
+      "phone",
+      "mobile",
+      "contact",
+      "telephone",
+      "phone number",
+    ]);
+
     const leadData = {
       companyId: req.user.company._id,
       formId: normalizedFormId || undefined,
@@ -272,15 +287,18 @@ export const createLead = async (req, res) => {
       updatedBy: req.user._id,
       tags,
       source: source || (req.isApiKeyAuth ? "Website" : source),
-      name: findValue(["name", "full name", "fullname", "username"]),
-      email: findValue(["email", "email address", "mail"]),
-      phone: findValue([
-        "phone",
-        "mobile",
-        "contact",
-        "telephone",
-        "phone number",
-      ]),
+      name:
+        rawName && typeof rawName === "string"
+          ? rawName.trim()
+          : rawName || req.body?.name || "",
+      email:
+        rawEmail && typeof rawEmail === "string"
+          ? rawEmail.trim()
+          : rawEmail || req.body?.email || "",
+      phone:
+        rawPhone && typeof rawPhone === "string"
+          ? rawPhone.trim()
+          : rawPhone || req.body?.phone || "",
     };
 
     const lead = await Lead.create(leadData);
@@ -303,6 +321,144 @@ export const createLead = async (req, res) => {
     });
   } catch (error) {
     sendError(res, 400, error.message);
+  }
+};
+
+// Bulk create leads (with or without email)
+export const bulkCreateLeads = async (req, res) => {
+  try {
+    const company = await Company.findById(req.user.company._id);
+    if (!company) {
+      return sendError(res, 404, "Company not found");
+    }
+
+    const rawLeads = Array.isArray(req.body) ? req.body : req.body?.leads;
+    if (!Array.isArray(rawLeads) || rawLeads.length === 0) {
+      return sendError(res, 400, "Leads array is required and must not be empty");
+    }
+
+    const currentLeadsCount = await Lead.countDocuments({
+      companyId: req.user.company._id,
+    });
+
+    if (currentLeadsCount + rawLeads.length > company.maxLeads) {
+      const remaining = Math.max(0, company.maxLeads - currentLeadsCount);
+      return sendError(
+        res,
+        403,
+        `Monthly limit reached. You can only add ${remaining} more leads (${company.maxLeads} limit).`,
+      );
+    }
+
+    const globalSource = req.body?.source;
+    const globalStatus = req.body?.status;
+    const globalPriority = req.body?.priority;
+
+    const reservedKeys = new Set([
+      "formId",
+      "data",
+      "status",
+      "priority",
+      "tags",
+      "source",
+      "api_key",
+    ]);
+
+    const findVal = (obj, keys) => {
+      if (!obj || typeof obj !== "object") return "";
+      const foundKey = Object.keys(obj).find((k) =>
+        keys.includes(k.toLowerCase()),
+      );
+      return foundKey && obj[foundKey] !== undefined && obj[foundKey] !== null
+        ? String(obj[foundKey]).trim()
+        : "";
+    };
+
+    const validDocs = [];
+    const failures = [];
+
+    rawLeads.forEach((item, index) => {
+      const rowNumber = item.rowNumber || index + 2;
+      const flatData = Object.entries(item || {}).reduce((acc, [key, value]) => {
+        if (!reservedKeys.has(key)) acc[key] = value;
+        return acc;
+      }, {});
+
+      const normalizedData = {
+        ...(flatData || {}),
+        ...(item.data && typeof item.data === "object" && !Array.isArray(item.data) ? item.data : {}),
+      };
+
+      const name =
+        findVal(normalizedData, ["name", "full name", "fullname", "username", "customername", "leadname"]) ||
+        (item.name ? String(item.name).trim() : "");
+      const email =
+        findVal(normalizedData, ["email", "email address", "mail"]) ||
+        (item.email ? String(item.email).trim() : "");
+      const phone =
+        findVal(normalizedData, ["phone", "mobile", "contact", "telephone", "phone number", "mobilenumber", "phonenumber"]) ||
+        (item.phone ? String(item.phone).trim() : "");
+
+      const phoneDigits = String(phone).replace(/\D/g, "");
+
+      if (!name) {
+        failures.push({ row: rowNumber, message: "Lead name is required." });
+        return;
+      }
+
+      if (!phoneDigits || phoneDigits.length < 8 || phoneDigits.length > 15) {
+        failures.push({
+          row: rowNumber,
+          message: "Phone number must be between 8-15 digits.",
+        });
+        return;
+      }
+
+      validDocs.push({
+        companyId: req.user.company._id,
+        data: normalizedData,
+        status: item.status || globalStatus || "New",
+        priority: item.priority || globalPriority || "Medium",
+        createdBy: req.user._id,
+        updatedBy: req.user._id,
+        source: item.source || globalSource || "Website",
+        name: name.trim(),
+        email: email ? email.trim() : "", // Email is completely optional
+        phone: phoneDigits,
+      });
+    });
+
+    let insertedCount = 0;
+    if (validDocs.length > 0) {
+      const inserted = await Lead.insertMany(validDocs, { ordered: false });
+      insertedCount = inserted.length;
+
+      await AuditLog.create({
+        user: req.user._id,
+        company: req.user.company._id,
+        action: "bulk_leads_created",
+        status: "success",
+        details: {
+          count: insertedCount,
+          totalSubmitted: rawLeads.length,
+        },
+      });
+    }
+
+    return sendResponse(
+      res,
+      201,
+      true,
+      `${insertedCount} leads created successfully`,
+      {
+        total: rawLeads.length,
+        success: insertedCount,
+        failed: failures.length,
+        failures,
+      },
+    );
+  } catch (error) {
+    return sendError(res, 500, error.message);
   }
 };
 // Get single lead details

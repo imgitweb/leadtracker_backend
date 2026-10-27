@@ -9,7 +9,8 @@ import {
   updateLeadStatus,
   updateLeadPriority,
   addFollowUp,
-  assignLead
+  assignLead,
+  bulkCreateLeads,
 } from '../controllers/leadController.js';
 import { protect  } from '../middleware/auth.js';
 
@@ -23,6 +24,8 @@ router.route('/')
 
 // All subsequent routes require JWT protection
 router.use(protect);
+
+router.post('/bulk', bulkCreateLeads);
 
 router.route('/:id')
   .get(getLeadDetails)
