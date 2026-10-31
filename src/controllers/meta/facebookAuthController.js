@@ -85,7 +85,7 @@ export const handleFacebookCallback = async (req, res) => {
             params: {
               access_token: pageAccessToken,
               // Yahan wo fields likhein jo aapko real-time mein chahiye
-              subscribed_fields: 'messages,messaging_postbacks,feed,comments' 
+              subscribed_fields: 'messages,messaging_postbacks,feed,leadgen' 
             }
           });
           console.log(`✅ Webhook subscribed for Page: ${page.name}`);

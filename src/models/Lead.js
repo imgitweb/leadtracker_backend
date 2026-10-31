@@ -89,6 +89,23 @@ const leadSchema = new mongoose.Schema(
       platformAccountId: { type: String, index: true } // Jis Page ID ya WA Phone ID par message aaya tha
     },
 
+    // 🎯 Meta Ads Lead Details (Instant Forms Sync)
+    metaLeadId: {
+      type: String,
+      index: true
+    },
+    metaDetails: {
+      formId: { type: String },
+      formName: { type: String },
+      adId: { type: String },
+      adName: { type: String },
+      adsetId: { type: String },
+      adsetName: { type: String },
+      campaignId: { type: String },
+      campaignName: { type: String },
+      pageId: { type: String }
+    },
+
     // 👥 Assignment (Quick Access)
     assignedTo: [
       {
@@ -149,6 +166,7 @@ const leadSchema = new mongoose.Schema(
 leadSchema.index({ companyId: 1, status: 1 });
 leadSchema.index({ companyId: 1, formId: 1 });
 leadSchema.index({ companyId: 1, source: 1 }); // Quick filter by source (helpful for AI leads)
+leadSchema.index({ companyId: 1, metaLeadId: 1 }); // Fast duplicate check for Meta Leads
 
 // Analytics
 leadSchema.index({ companyId: 1, createdAt: -1 });

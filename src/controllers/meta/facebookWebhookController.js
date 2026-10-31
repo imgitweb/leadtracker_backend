@@ -16,7 +16,9 @@ import AutoReplyRule from "../../models/AutoReplyRule.js";
 
 // Common Models
 import StartupData from "../../models/StartupData.js";
+import User from "../../models/User.js";
 import { generateAIReply } from "../../utils/aiHelper.js";
+import { fetchLeadFromGraph, saveMetaLead } from "../../services/metaLeadSyncService.js";
 
 dotenv.config();
 
@@ -155,9 +157,53 @@ export const handleFbWebhook = async (req, res) => {
         }
       }
 
-      // 📝 MODULE B: FACEBOOK POST COMMENTS
+      // 📝 MODULE B: FACEBOOK POST COMMENTS & MODULE C: LEAD ADS
       if (entry.changes) {
         for (const change of entry.changes) {
+          // 🎯 MODULE C: FACEBOOK LEAD ADS (Instant Forms)
+          if (change.field === "leadgen") {
+            const leadgenValue = change.value || {};
+            const leadgenId = leadgenValue.leadgen_id;
+            const formId = leadgenValue.form_id;
+            const adId = leadgenValue.ad_id;
+            const eventPageId = leadgenValue.page_id || pageId;
+
+            console.log(`[FB Webhook Leadgen] New Lead Event Received! ID: ${leadgenId} | Page: ${eventPageId} | Form: ${formId} | Ad: ${adId}`);
+
+            if (leadgenId && eventPageId) {
+              try {
+                const account = await FacebookAccount.findOne({ page_id: eventPageId });
+                if (!account) {
+                  console.error(`[FB Webhook Leadgen] No FacebookAccount found in DB for Page ID: ${eventPageId}`);
+                  continue;
+                }
+
+                const companyId = account.company || (await User.findById(account.userId))?.company;
+                if (!companyId) {
+                  console.error(`[FB Webhook Leadgen] No company found for FacebookAccount user ${account.userId}`);
+                  continue;
+                }
+
+                // Fetch full lead payload from Meta Graph API
+                const rawLead = await fetchLeadFromGraph(leadgenId, account.access_token);
+
+                // Save lead into CRM with automatic duplicate skipping
+                const saveResult = await saveMetaLead({
+                  leadData: rawLead,
+                  pageId: eventPageId,
+                  companyId,
+                  userId: account.userId,
+                  io,
+                });
+
+                console.log(`[FB Webhook Leadgen] Ingestion Result for ${leadgenId}:`, saveResult.status, saveResult.reason || "");
+              } catch (leadgenErr) {
+                console.error(`[FB Webhook Leadgen] Failed to process lead ${leadgenId}:`, leadgenErr.response?.data || leadgenErr.message);
+              }
+            }
+            continue;
+          }
+
           if (change.field === "feed" && change.value.item === "comment" && change.value.verb === "add") {
             const commentData = change.value;
             if (commentData.from.id === pageId) continue;
