@@ -73,7 +73,11 @@ const leadSchema = new mongoose.Schema(
         if (cleanNum.length === 12 && cleanNum.startsWith('91')) {
           return cleanNum.substring(2); // Returns 10 digit number e.g., 8103306133
         }
-        return cleanNum; // Returns as is if not 12 digits
+        // Agar 11 digit hai aur 0 se start hai, toh 0 hata do
+        if (cleanNum.length === 11 && cleanNum.startsWith('0')) {
+          return cleanNum.substring(1);
+        }
+        return cleanNum; // Returns as is if not 11/12 digits
       }
     },
 
@@ -167,6 +171,8 @@ leadSchema.index({ companyId: 1, status: 1 });
 leadSchema.index({ companyId: 1, formId: 1 });
 leadSchema.index({ companyId: 1, source: 1 }); // Quick filter by source (helpful for AI leads)
 leadSchema.index({ companyId: 1, metaLeadId: 1 }); // Fast duplicate check for Meta Leads
+leadSchema.index({ companyId: 1, phone: 1 }); // Fast duplicate check by phone within company
+leadSchema.index({ companyId: 1, email: 1 }); // Fast duplicate check by email within company
 
 // Analytics
 leadSchema.index({ companyId: 1, createdAt: -1 });
