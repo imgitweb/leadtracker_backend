@@ -36,6 +36,9 @@ export const createTemplate = async (req, res) => {
     const template = await BulkEmailService.createTemplate(req.user.company._id, req.user._id, req.body);
     sendResponse(res, 201, true, 'Template created successfully', { template });
   } catch (error) {
+    if (error.code === 11000) {
+      return sendError(res, 400, 'A template with this name already exists. Please choose a different name.');
+    }
     sendError(res, 400, error.message, error);
   }
 };
@@ -45,6 +48,9 @@ export const updateTemplate = async (req, res) => {
     const template = await BulkEmailService.updateTemplate(req.user.company._id, req.params.templateId, req.user._id, req.body);
     sendResponse(res, 200, true, 'Template updated successfully', { template });
   } catch (error) {
+    if (error.code === 11000) {
+      return sendError(res, 400, 'A template with this name already exists. Please choose a different name.');
+    }
     sendError(res, 400, error.message, error);
   }
 };

@@ -42,18 +42,148 @@ const normalizeEmail = (value) => normalizeString(value).toLowerCase();
 
 const isValidEmail = (value) => /^\S+@\S+\.\S+$/.test(normalizeEmail(value));
 
-const renderTemplate = (value, recipient = {}, companyName = '') => {
-  const source = {
-    companyName,
-    ...recipient,
-    ...recipient.customData,
+const buildResponsiveEmailHtml = (contentHtml, unsubTrackUrl, openTrackUrl) => {
+  const hasFullDocument = /<!DOCTYPE|<html|<table[^>]*width=["']100%["']/i.test(contentHtml);
+
+  if (hasFullDocument) {
+    let result = contentHtml;
+    if (unsubTrackUrl && !result.includes(unsubTrackUrl) && !result.includes('unsubscribe')) {
+      result = result.replace(
+        /<\/body>/i,
+        `<div style="padding: 20px; font-size: 12px; color: #64748b; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          If you no longer wish to receive these emails, you can <a href="${unsubTrackUrl}" style="color: #08C378; text-decoration: underline;">unsubscribe here</a>.
+        </div></body>`
+      );
+    }
+    if (openTrackUrl && !result.includes(openTrackUrl)) {
+      result = result.replace(
+        /<\/body>/i,
+        `<img src="${openTrackUrl}" width="1" height="1" style="display:none; visibility:hidden; opacity:0;" alt="" /></body>`
+      );
+    }
+    return result;
+  }
+
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <title>Email</title>
+  <style type="text/css">
+    body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+    table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+    img { -ms-interpolation-mode: bicubic; border: 0; outline: none; text-decoration: none; }
+    body { margin: 0 !important; padding: 0 !important; width: 100% !important; background-color: #f1f5f9; }
+    @media only screen and (max-width: 620px) {
+      .email-card { width: 100% !important; max-width: 100% !important; border-radius: 0 !important; border-left: none !important; border-right: none !important; }
+      .email-cell { padding: 22px 16px !important; }
+    }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f1f5f9; -webkit-font-smoothing: antialiased; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#f1f5f9" style="background-color: #f1f5f9; width: 100%; margin: 0; padding: 0; border-collapse: collapse;">
+    <tr>
+      <td align="center" valign="top" style="padding: 28px 12px;">
+        <!--[if (gte mso 9)|(IE)]>
+        <table align="center" border="0" cellspacing="0" cellpadding="0" width="600">
+        <tr>
+        <td align="center" valign="top" width="600">
+        <![endif]-->
+        <table role="presentation" class="email-card" border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#ffffff" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; overflow: hidden; border-collapse: separate; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+          <tr>
+            <td class="email-cell" align="left" valign="top" style="padding: 32px 36px; background-color: #ffffff; color: #1e293b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 15px; line-height: 1.65;">
+              ${contentHtml}
+            </td>
+          </tr>
+          <tr>
+            <td align="center" valign="middle" bgcolor="#f8fafc" style="padding: 16px 24px; background-color: #f8fafc; border-top: 1px solid #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; color: #64748b; line-height: 1.5;">
+              <div>If you no longer wish to receive these emails, you can <a href="${unsubTrackUrl}" style="color: #08C378; text-decoration: underline; font-weight: 500;">unsubscribe here</a>.</div>
+            </td>
+          </tr>
+        </table>
+        <!--[if (gte mso 9)|(IE)]>
+        </td>
+        </tr>
+        </table>
+        <![endif]-->
+      </td>
+    </tr>
+  </table>
+  <img src="${openTrackUrl}" width="1" height="1" style="display:none; visibility:hidden; opacity:0;" alt="" />
+</body>
+</html>`;
+};
+
+const renderTemplate = (value, recipient = {}, companyName = '', smtpConfig = {}) => {
+  if (!value) return '';
+
+  const rawName = normalizeString(recipient?.name || recipient?.customData?.name || recipient?.customData?.fullName || '');
+  const firstName = rawName.split(' ')[0] || rawName || 'Friend';
+  const email = normalizeString(recipient?.email || '');
+  const phone = normalizeString(recipient?.phone || recipient?.customData?.phone || '');
+  const company = normalizeString(recipient?.customData?.company || recipient?.customData?.companyName || companyName || smtpConfig?.fromName || 'Your Company');
+  const senderName = normalizeString(smtpConfig?.fromName || companyName || 'Team');
+  const supportEmail = normalizeString(smtpConfig?.replyTo || smtpConfig?.fromEmail || 'support@cinfy.co');
+  const websiteUrl = 'https://' + (supportEmail.split('@')[1] || 'cinfy.co');
+
+  const replacements = {
+    name: rawName || firstName,
+    fullname: rawName || firstName,
+    'full name': rawName || firstName,
+    firstname: firstName,
+    first_name: firstName,
+    'first name': firstName,
+    email: email,
+    phone: phone,
+    company: company,
+    companyname: company,
+    company_name: company,
+    'company name': company,
+    yourname: senderName,
+    'your name': senderName,
+    sendername: senderName,
+    'sender name': senderName,
+    supportemail: supportEmail,
+    'support email': supportEmail,
+    contactinformation: supportEmail,
+    'contact information': supportEmail,
+    websiteurl: websiteUrl,
+    'website url': websiteUrl,
   };
 
-  return String(value || '').replace(PLACEHOLDER_PATTERN, (_, token) => {
-    const matchKey = Object.keys(source).find((key) => key.toLowerCase() === token.toLowerCase());
-    const replacement = matchKey ? source[matchKey] : '';
-    return replacement === undefined || replacement === null ? '' : String(replacement);
+  if (recipient?.customData && typeof recipient.customData === 'object') {
+    Object.keys(recipient.customData).forEach(k => {
+      const v = recipient.customData[k];
+      if (v !== undefined && v !== null) {
+        replacements[k.toLowerCase()] = String(v);
+        replacements[k.toLowerCase().replace(/[\s_-]/g, '')] = String(v);
+      }
+    });
+  }
+
+  let result = String(value);
+
+  // 1. Replace {{...}}
+  result = result.replace(/\{\{\s*([a-zA-Z0-9_\s.-]+)\s*\}\}/g, (match, token) => {
+    const cleanToken = token.trim().toLowerCase();
+    const normalizedKey = cleanToken.replace(/[\s_-]/g, '');
+    if (replacements[cleanToken] !== undefined) return replacements[cleanToken];
+    if (replacements[normalizedKey] !== undefined) return replacements[normalizedKey];
+    return match;
   });
+
+  // 2. Replace [...] (e.g. [First Name], [Company Name], [Your Name], [Contact Information], [Website URL], [Support Email])
+  result = result.replace(/\[\s*([a-zA-Z0-9_\s.-]+)\s*\]/g, (match, token) => {
+    const cleanToken = token.trim().toLowerCase();
+    const normalizedKey = cleanToken.replace(/[\s_-]/g, '');
+    if (replacements[cleanToken] !== undefined) return replacements[cleanToken];
+    if (replacements[normalizedKey] !== undefined) return replacements[normalizedKey];
+    return match;
+  });
+
+  return result;
 };
 
 const getBuiltInTemplate = (templateKey) => BUILTIN_TEMPLATES.find((template) => template.key === templateKey);
@@ -145,7 +275,7 @@ const createCampaignDraft = async (companyId, creatorId, payload = {}) => {
     smtpConfigId: payload.smtpConfigId || null,
     templateId: selection.templateId,
     name,
-    subjectSnapshot: renderTemplate(selection.subject, { name: 'Recipient' }, companyName),
+    subjectSnapshot: selection.subject,
     htmlSnapshot: selection.htmlBody,
     textSnapshot: selection.textBody,
     audienceSource: normalizeString(payload.audienceSource || 'manual') || 'manual',
@@ -444,86 +574,71 @@ export class BulkEmailService {
     let failedCount = campaign.failedCount || 0;
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:5001';
 
-    const BATCH_SIZE = 50;
-    for (let i = 0; i < recipientsToProcess.length; i += BATCH_SIZE) {
-      const batch = recipientsToProcess.slice(i, i + BATCH_SIZE);
-      const batchPromises = batch.map(async (recipient) => {
-        const trackingId = crypto.randomUUID();
-        try {
-          const subject = renderTemplate(campaign.subjectSnapshot, recipient, companyName);
-          let html = renderTemplate(campaign.htmlSnapshot, recipient, companyName);
-          const text = renderTemplate(campaign.textSnapshot || '', recipient, companyName);
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-          const openTrackUrl = `${backendUrl}/api/bulk-email/track/open/${campaign._id}/${trackingId}.png`;
-          const unsubTrackUrl = `${backendUrl}/api/bulk-email/track/unsubscribe/${campaign._id}/${trackingId}`;
+    // Send emails one by one sequentially for maximum deliverability & real-time tracking
+    for (let idx = 0; idx < recipientsToProcess.length; idx++) {
+      const recipient = recipientsToProcess[idx];
+      const trackingId = crypto.randomUUID();
+      try {
+        const subject = renderTemplate(campaign.subjectSnapshot, recipient, companyName, smtpConfig);
+        const htmlContent = renderTemplate(campaign.htmlSnapshot, recipient, companyName, smtpConfig);
+        const textContent = renderTemplate(campaign.textSnapshot || '', recipient, companyName, smtpConfig);
 
-          const wrappedHtml = `
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-</head>
-<body style="margin: 0; padding: 0; background-color: #f6f9fc; font-family: system-ui, -apple-system, sans-serif;">
-  ${html}
-  <div style="margin-top: 20px; padding: 20px; font-size: 12px; color: #666; text-align: center;">
-    If you no longer wish to receive these emails, you can <a href="${unsubTrackUrl}" style="color: #0066cc; text-decoration: underline;">unsubscribe here</a>.
-  </div>
-  <img src="${openTrackUrl}" width="1" height="1" style="display:none; visibility:hidden; opacity:0;" alt="" />
-</body>
-</html>`;
+        const openTrackUrl = `${backendUrl}/api/bulk-email/track/open/${campaign._id}/${trackingId}.png`;
+        const unsubTrackUrl = `${backendUrl}/api/bulk-email/track/unsubscribe/${campaign._id}/${trackingId}`;
 
-          const mailOptions = {
-            from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
-            to: recipient.email,
-            cc: (campaign.ccRecipients || []).map(r => r.email).filter(Boolean).join(', ') || undefined,
-            bcc: (campaign.bccRecipients || []).map(r => r.email).filter(Boolean).join(', ') || undefined,
-            subject,
-            html: wrappedHtml,
-            text: text || undefined,
-            replyTo: smtpConfig.replyTo || undefined,
-            headers: {
-              'List-Unsubscribe': `<${unsubTrackUrl}>`,
-              'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
-            }
-          };
+        const wrappedHtml = buildResponsiveEmailHtml(htmlContent, unsubTrackUrl, openTrackUrl);
 
-          if (campaign.attachments && campaign.attachments.length > 0) {
-            mailOptions.attachments = campaign.attachments.map(att => ({
-              filename: att.filename,
-              path: att.path,
-              contentType: att.mimetype
-            }));
+        // Include CC/BCC only on the first dispatched email to avoid spamming CC recipients with duplicates
+        const isFirst = idx === 0;
+        const mailOptions = {
+          from: `"${smtpConfig.fromName}" <${smtpConfig.fromEmail}>`,
+          to: recipient.email,
+          cc: isFirst ? ((campaign.ccRecipients || []).map(r => r.email).filter(Boolean).join(', ') || undefined) : undefined,
+          bcc: isFirst ? ((campaign.bccRecipients || []).map(r => r.email).filter(Boolean).join(', ') || undefined) : undefined,
+          subject,
+          html: wrappedHtml,
+          text: textContent || undefined,
+          replyTo: smtpConfig.replyTo || undefined,
+          headers: {
+            'List-Unsubscribe': `<${unsubTrackUrl}>`,
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
           }
+        };
 
-          const result = await transport.sendMail(mailOptions);
-
-          return { success: true, email: recipient.email, messageId: result.messageId || '', trackingId };
-        } catch (error) {
-          return { success: false, email: recipient.email, error: error.message, trackingId };
+        if (campaign.attachments && campaign.attachments.length > 0) {
+          mailOptions.attachments = campaign.attachments.map(att => ({
+            filename: att.filename,
+            path: att.path,
+            contentType: att.mimetype
+          }));
         }
-      });
 
-      const batchResults = await Promise.all(batchPromises);
-      const batchLog = [];
-      batchResults.forEach(res => {
-        if (res.success) {
-          sentCount += 1;
-          batchLog.push({ email: res.email, status: 'sent', messageId: res.messageId, trackingId: res.trackingId, sentAt: new Date() });
-        } else {
-          failedCount += 1;
-          batchLog.push({ email: res.email, status: 'failed', error: res.error, trackingId: res.trackingId, sentAt: new Date() });
-        }
-      });
+        const result = await transport.sendMail(mailOptions);
+        sentCount += 1;
+        await EmailCampaign.updateOne(
+          { _id: campaign._id },
+          { 
+            $set: { sentCount, failedCount },
+            $push: { sendLog: { email: recipient.email, status: 'sent', messageId: result.messageId || '', trackingId, sentAt: new Date() } }
+          }
+        );
+      } catch (error) {
+        failedCount += 1;
+        await EmailCampaign.updateOne(
+          { _id: campaign._id },
+          { 
+            $set: { sentCount, failedCount },
+            $push: { sendLog: { email: recipient.email, status: 'failed', error: error.message, trackingId, sentAt: new Date() } }
+          }
+        );
+      }
 
-      // Use updateOne to prevent VersionError if trackOpen/trackUnsubscribe run concurrently
-      await EmailCampaign.updateOne(
-        { _id: campaign._id },
-        { 
-          $set: { sentCount, failedCount },
-          $push: { sendLog: { $each: batchLog } }
-        }
-      );
+      // 100ms throttle between emails so SMTP doesn't rate-limit or flag bulk bursts
+      if (idx < recipientsToProcess.length - 1) {
+        await sleep(100);
+      }
     }
 
     const finalStatus = failedCount === 0 ? 'sent' : (sentCount > 0 ? 'partially_sent' : 'failed');

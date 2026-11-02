@@ -163,7 +163,7 @@ export const getLeads = async (req, res) => {
             { $set: { updatedBy: matchedUser._id } },
           )
             .exec()
-            .catch(() => {});
+            .catch(() => { });
         }
       }
     }
@@ -237,6 +237,7 @@ export const createLead = async (req, res) => {
     // 1) { formId, data: { ...fields } }
     // 2) { formId, name, email, phone, ...customFields }
     const reservedKeys = new Set([
+      "rowNumber",
       "formId",
       "data",
       "status",
@@ -244,6 +245,9 @@ export const createLead = async (req, res) => {
       "tags",
       "source",
       "api_key",
+      "_id",
+      "createdAt",
+      "updatedAt",
     ]);
     const flatData = Object.entries(req.body || {}).reduce(
       (acc, [key, value]) => {
@@ -301,6 +305,28 @@ export const createLead = async (req, res) => {
           : rawPhone || req.body?.phone || "",
     };
 
+    // 🔍 Duplicate Check for Single Lead Creation
+    let checkPhone = leadData.phone ? String(leadData.phone).replace(/\D/g, "") : "";
+    if (checkPhone.length === 12 && checkPhone.startsWith("91")) {
+      checkPhone = checkPhone.substring(2);
+    } else if (checkPhone.length === 11 && checkPhone.startsWith("0")) {
+      checkPhone = checkPhone.substring(1);
+    }
+
+    if (checkPhone) {
+      const existingLeadWithPhone = await Lead.findOne({
+        companyId: req.user.company._id,
+        phone: checkPhone,
+      });
+      if (existingLeadWithPhone) {
+        return sendError(
+          res,
+          409,
+          `A lead with phone number ${checkPhone} already exists in CRM (${existingLeadWithPhone.name || "Unnamed"}).`
+        );
+      }
+    }
+
     const lead = await Lead.create(leadData);
 
     // Audit Log
@@ -324,7 +350,7 @@ export const createLead = async (req, res) => {
   }
 };
 
-// Bulk create leads (with or without email)
+// Bulk create leads (with strict duplicate checks & normalization)
 export const bulkCreateLeads = async (req, res) => {
   try {
     const company = await Company.findById(req.user.company._id);
@@ -337,24 +363,12 @@ export const bulkCreateLeads = async (req, res) => {
       return sendError(res, 400, "Leads array is required and must not be empty");
     }
 
-    const currentLeadsCount = await Lead.countDocuments({
-      companyId: req.user.company._id,
-    });
-
-    if (currentLeadsCount + rawLeads.length > company.maxLeads) {
-      const remaining = Math.max(0, company.maxLeads - currentLeadsCount);
-      return sendError(
-        res,
-        403,
-        `Monthly limit reached. You can only add ${remaining} more leads (${company.maxLeads} limit).`,
-      );
-    }
-
     const globalSource = req.body?.source;
     const globalStatus = req.body?.status;
     const globalPriority = req.body?.priority;
 
     const reservedKeys = new Set([
+      "rowNumber",
       "formId",
       "data",
       "status",
@@ -362,6 +376,9 @@ export const bulkCreateLeads = async (req, res) => {
       "tags",
       "source",
       "api_key",
+      "_id",
+      "createdAt",
+      "updatedAt",
     ]);
 
     const findVal = (obj, keys) => {
@@ -374,9 +391,78 @@ export const bulkCreateLeads = async (req, res) => {
         : "";
     };
 
+    const normalizePhoneStr = (num) => {
+      if (!num) return "";
+      let clean = String(num).replace(/\D/g, "");
+      if (clean.length === 12 && clean.startsWith("91")) {
+        return clean.substring(2);
+      }
+      if (clean.length === 11 && clean.startsWith("0")) {
+        return clean.substring(1);
+      }
+      return clean;
+    };
+
+    // 1. Extract all candidate phones and emails from incoming batch
+    const candidatePhones = new Set();
+    const candidateEmails = new Set();
+
+    rawLeads.forEach((item) => {
+      const flatData = Object.entries(item || {}).reduce((acc, [key, value]) => {
+        if (!reservedKeys.has(key)) acc[key] = value;
+        return acc;
+      }, {});
+      const normalizedData = {
+        ...(flatData || {}),
+        ...(item.data && typeof item.data === "object" && !Array.isArray(item.data) ? item.data : {}),
+      };
+
+      const rawPhone =
+        findVal(normalizedData, [
+          "phone", "mobile", "contact", "telephone", "phone number", "mobilenumber", "phonenumber"
+        ]) || (item.phone ? String(item.phone).trim() : "");
+      const cleanPhone = normalizePhoneStr(rawPhone);
+      if (cleanPhone) candidatePhones.add(cleanPhone);
+
+      const rawEmail =
+        findVal(normalizedData, ["email", "email address", "mail"]) ||
+        (item.email ? String(item.email).trim() : "");
+      if (rawEmail) candidateEmails.add(rawEmail.toLowerCase());
+    });
+
+    // 2. Query MongoDB in one fast query for already existing leads in this company
+    const existingConditions = [];
+    if (candidatePhones.size > 0) {
+      existingConditions.push({ phone: { $in: Array.from(candidatePhones) } });
+    }
+    if (candidateEmails.size > 0) {
+      existingConditions.push({ email: { $in: Array.from(candidateEmails) } });
+    }
+
+    let existingLeadsInDb = [];
+    if (existingConditions.length > 0) {
+      existingLeadsInDb = await Lead.find({
+        companyId: req.user.company._id,
+        $or: existingConditions,
+      }).select("phone email name").lean();
+    }
+
+    const dbExistingPhones = new Set(
+      existingLeadsInDb.map((l) => normalizePhoneStr(l.phone)).filter(Boolean)
+    );
+    const dbExistingEmails = new Set(
+      existingLeadsInDb.map((l) => (l.email ? l.email.toLowerCase() : "")).filter(Boolean)
+    );
+
+    // Sets to prevent duplicates within the uploaded file itself
+    const seenBatchPhones = new Set();
+    const seenBatchEmails = new Set();
+
     const validDocs = [];
     const failures = [];
+    let duplicateCount = 0;
 
+    // 3. Process and filter rows
     rawLeads.forEach((item, index) => {
       const rowNumber = item.rowNumber || index + 2;
       const flatData = Object.entries(item || {}).reduce((acc, [key, value]) => {
@@ -399,20 +485,63 @@ export const bulkCreateLeads = async (req, res) => {
         findVal(normalizedData, ["phone", "mobile", "contact", "telephone", "phone number", "mobilenumber", "phonenumber"]) ||
         (item.phone ? String(item.phone).trim() : "");
 
-      const phoneDigits = String(phone).replace(/\D/g, "");
+      const cleanPhone = normalizePhoneStr(phone);
+      const cleanEmail = email ? email.toLowerCase().trim() : "";
 
       if (!name) {
         failures.push({ row: rowNumber, message: "Lead name is required." });
         return;
       }
 
-      if (!phoneDigits || phoneDigits.length < 8 || phoneDigits.length > 15) {
+      if (!cleanPhone || cleanPhone.length < 8 || cleanPhone.length > 15) {
         failures.push({
           row: rowNumber,
           message: "Phone number must be between 8-15 digits.",
         });
         return;
       }
+
+      // Check duplicate against Database
+      if (dbExistingPhones.has(cleanPhone)) {
+        duplicateCount++;
+        failures.push({
+          row: rowNumber,
+          message: `Duplicate: Lead with phone ${cleanPhone} already exists in CRM.`,
+        });
+        return;
+      }
+
+      if (cleanEmail && dbExistingEmails.has(cleanEmail)) {
+        duplicateCount++;
+        failures.push({
+          row: rowNumber,
+          message: `Duplicate: Lead with email ${cleanEmail} already exists in CRM.`,
+        });
+        return;
+      }
+
+      // Check duplicate within the uploaded spreadsheet file
+      if (seenBatchPhones.has(cleanPhone)) {
+        duplicateCount++;
+        failures.push({
+          row: rowNumber,
+          message: `Duplicate in file: Phone ${cleanPhone} repeated in spreadsheet.`,
+        });
+        return;
+      }
+
+      if (cleanEmail && seenBatchEmails.has(cleanEmail)) {
+        duplicateCount++;
+        failures.push({
+          row: rowNumber,
+          message: `Duplicate in file: Email ${cleanEmail} repeated in spreadsheet.`,
+        });
+        return;
+      }
+
+      // Track as seen in current batch
+      seenBatchPhones.add(cleanPhone);
+      if (cleanEmail) seenBatchEmails.add(cleanEmail);
 
       validDocs.push({
         companyId: req.user.company._id,
@@ -423,10 +552,24 @@ export const bulkCreateLeads = async (req, res) => {
         updatedBy: req.user._id,
         source: item.source || globalSource || "Website",
         name: name.trim(),
-        email: email ? email.trim() : "", // Email is completely optional
-        phone: phoneDigits,
+        email: cleanEmail,
+        phone: cleanPhone,
       });
     });
+
+    // 4. Check Plan Limits against actual new leads to be inserted
+    const currentLeadsCount = await Lead.countDocuments({
+      companyId: req.user.company._id,
+    });
+
+    if (currentLeadsCount + validDocs.length > company.maxLeads) {
+      const remaining = Math.max(0, company.maxLeads - currentLeadsCount);
+      return sendError(
+        res,
+        403,
+        `Monthly limit reached. You can only add ${remaining} more leads (${company.maxLeads} limit).`,
+      );
+    }
 
     let insertedCount = 0;
     if (validDocs.length > 0) {
@@ -440,6 +583,7 @@ export const bulkCreateLeads = async (req, res) => {
         status: "success",
         details: {
           count: insertedCount,
+          duplicatesSkipped: duplicateCount,
           totalSubmitted: rawLeads.length,
         },
       });
@@ -449,10 +593,11 @@ export const bulkCreateLeads = async (req, res) => {
       res,
       201,
       true,
-      `${insertedCount} leads created successfully`,
+      `${insertedCount} leads created successfully${duplicateCount > 0 ? ` (${duplicateCount} duplicates skipped)` : ""}`,
       {
         total: rawLeads.length,
         success: insertedCount,
+        duplicates: duplicateCount,
         failed: failures.length,
         failures,
       },

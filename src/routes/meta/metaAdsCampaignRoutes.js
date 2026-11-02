@@ -10,6 +10,7 @@ import {
   getAllCampaigns,
   syncWithMeta,
 } from "../../controllers/meta/metaAdsCampaignController.js";
+import { syncMetaLeads, getMetaLeadsStats } from "../../controllers/meta/metaLeadSyncController.js";
 import { protect } from "../../middleware/auth.js";
 import {
   getAdSetAds,
@@ -48,5 +49,9 @@ router.post("/ads/create", protect, createAd);
 router.post("/ads/status", protect, updateAdStatus);
 router.delete("/ads/:adId", protect, deleteAd);
 router.get("/ads/insights", protect, getAdInsights);
+
+// 🎯 Direct Facebook Ads Lead Sync to CRM
+router.post("/sync-leads", protect, syncMetaLeads);
+router.get("/leads-stats", protect, getMetaLeadsStats);
 
 export default router;
