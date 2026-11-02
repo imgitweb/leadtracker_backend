@@ -2,6 +2,7 @@ import Campaign from "../models/Campaign.js";
 import Contact from "../models/Contact.js";
 import Call from "../models/Call.js";
 import { initiateTwilioOutboundCall } from "./twilioService.js";
+import { getTwilioClient } from "../config/twilio.js";
 
 let isQueueProcessing = false;
 let queueInterval = null;
@@ -14,7 +15,6 @@ export const processCallingQueue = async (ioInstance = null) => {
   isQueueProcessing = true;
 
   try {
-    // 1. Find all running campaigns
     const runningCampaigns = await Campaign.find({ status: "running" });
 
     for (const campaign of runningCampaigns) {
@@ -34,7 +34,44 @@ export const processCampaignBatch = async (campaign, ioInstance = null) => {
   try {
     const campaignId = campaign._id;
 
-    // Count currently active calls for this campaign
+    // 1. Auto-sync in-flight calls directly with Twilio so finished calls are never left hanging
+    const inFlightCalls = await Call.find({
+      campaignId,
+      status: { $in: ["queued", "initiated", "ringing", "in-progress"] },
+      callSid: { $regex: /^CA/i },
+    });
+
+    for (const inFlight of inFlightCalls) {
+      try {
+        const twClient = getTwilioClient();
+        if (twClient) {
+          const liveCall = await twClient.calls(inFlight.callSid).fetch();
+          if (["completed", "busy", "no-answer", "failed", "canceled"].includes(liveCall.status)) {
+            const prevStatus = inFlight.status;
+            inFlight.status = liveCall.status;
+            inFlight.duration = parseInt(liveCall.duration || 0, 10);
+            inFlight.endTime = new Date();
+            await inFlight.save();
+
+            if (inFlight.contactId) {
+              await Contact.findByIdAndUpdate(inFlight.contactId, {
+                callStatus: liveCall.status,
+                lastCallTime: new Date(),
+              });
+            }
+
+            if (prevStatus !== liveCall.status) {
+              const field = liveCall.status === "completed" ? "callsCompleted" : "callsFailed";
+              await Campaign.findByIdAndUpdate(campaignId, { $inc: { [field]: 1 } });
+            }
+          }
+        }
+      } catch (e) {
+        // Ignore single call fetch errors and continue
+      }
+    }
+
+    // 2. Count currently active calls for this campaign after live sync
     const activeCallsCount = await Call.countDocuments({
       campaignId,
       status: { $in: ["queued", "initiated", "ringing", "in-progress"] },
@@ -64,17 +101,24 @@ export const processCampaignBatch = async (campaign, ioInstance = null) => {
     if (eligibleContacts.length === 0) {
       // Check if there are any remaining calls in progress
       if (activeCallsCount === 0) {
-        // All contacts processed and no active calls, campaign complete!
-        campaign.status = "completed";
+        const refreshedCampaign = await Campaign.findById(campaignId);
+        const completedCount = refreshedCampaign?.callsCompleted || 0;
+        const failedCount = refreshedCampaign?.callsFailed || 0;
+
+        if (completedCount === 0 && failedCount > 0) {
+          campaign.status = "failed";
+          console.warn(`⚠️ [CallingQueue] Campaign finished with failures: ${campaign.name} (${failedCount} calls failed, 0 completed).`);
+        } else {
+          campaign.status = "completed";
+          console.log(`🎉 [CallingQueue] Campaign completed: ${campaign.name} (${completedCount} completed, ${failedCount} failed).`);
+        }
         campaign.completedAt = new Date();
         await campaign.save();
-
-        console.log(`🎉 Campaign completed: ${campaign.name} (${campaign._id})`);
 
         if (ioInstance) {
           ioInstance.emit("campaign_status_changed", {
             campaignId: campaign._id,
-            status: "completed",
+            status: campaign.status,
           });
         }
       }
@@ -96,7 +140,7 @@ export const processCampaignBatch = async (campaign, ioInstance = null) => {
           campaignId: campaign._id,
           company: campaign.company,
           callSid: `pending_${contact._id}_${Date.now()}`,
-          fromNumber: campaign.callerId || process.env.TWILIO_PHONE_NUMBER,
+          fromNumber: (campaign.callerId && campaign.callerId !== "+17372508034") ? campaign.callerId : (process.env.TWILIO_PHONE_NUMBER || "+17372212163"),
           toNumber: contact.phone,
           status: "queued",
           startTime: new Date(),
@@ -104,11 +148,12 @@ export const processCampaignBatch = async (campaign, ioInstance = null) => {
 
         // Fire outbound call via Twilio
         try {
+          const publicBaseUrl = (process.env.PUBLIC_BASE_URL || process.env.APP_URL || "").replace(/\/+$/, "");
           const twilioCall = await initiateTwilioOutboundCall({
             to: contact.phone,
-            from: campaign.callerId,
+            from: (campaign.callerId && campaign.callerId !== "+17372508034") ? campaign.callerId : (process.env.TWILIO_PHONE_NUMBER || "+17372212163"),
             callRecordId: callRecord._id.toString(),
-            publicBaseUrl: process.env.PUBLIC_BASE_URL || process.env.APP_URL,
+            publicBaseUrl,
             recordCall: false,
           });
 
@@ -133,8 +178,9 @@ export const processCampaignBatch = async (campaign, ioInstance = null) => {
             });
           }
         } catch (twilioError) {
-          console.error(`Twilio call failed for ${contact.phone}:`, twilioError.message);
+          console.error(`❌ [CallingQueue] Twilio call failed for ${contact.phone}: ${twilioError.message}`);
 
+          // Mark call as failed in DB
           callRecord.status = "failed";
           callRecord.errorMessage = twilioError.message;
           callRecord.endTime = new Date();
@@ -146,32 +192,53 @@ export const processCampaignBatch = async (campaign, ioInstance = null) => {
           await Campaign.findByIdAndUpdate(campaignId, {
             $inc: { callsFailed: 1 },
           });
+
+          if (ioInstance) {
+            ioInstance.emit("call_failed", {
+              callId: callRecord._id,
+              campaignId,
+              contact: { name: contact.name, phone: contact.phone },
+              error: twilioError.message,
+            });
+          }
         }
-      } catch (contactErr) {
-        console.error(`Error dispatching call for contact ${contact._id}:`, contactErr.message);
+      } catch (contactError) {
+        console.error(`❌ [CallingQueue] Error processing contact ${contact._id}:`, contactError.message);
       }
     }
   } catch (error) {
-    console.error(`Error processing campaign ${campaign._id}:`, error.message);
+    console.error("Process Campaign Batch Error:", error.message);
   }
 };
 
 /**
- * Starts the calling queue background worker
+ * Start the background queue worker (Runs every 10 seconds)
  */
 export const startCallingQueueWorker = (ioInstance = null) => {
   if (queueInterval) return;
 
-  console.log("🚀 AI Calling Queue Worker Initialized (5s interval)");
+  console.log("🚀 [CallingQueue] Background calling worker started (10s cycle).");
   queueInterval = setInterval(() => {
     processCallingQueue(ioInstance).catch((err) => {
-      console.error("Queue worker error:", err.message);
+      console.error("❌ [CallingQueue] Worker loop error:", err.message);
     });
-  }, 5000);
+  }, 10000);
+};
+
+/**
+ * Stop the background queue worker
+ */
+export const stopCallingQueueWorker = () => {
+  if (queueInterval) {
+    clearInterval(queueInterval);
+    queueInterval = null;
+    console.log("🛑 [CallingQueue] Background calling worker stopped.");
+  }
 };
 
 export default {
   processCallingQueue,
   processCampaignBatch,
   startCallingQueueWorker,
+  stopCallingQueueWorker,
 };

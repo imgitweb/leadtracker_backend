@@ -71,6 +71,7 @@ import campaignRoutes from "./routes/campaignRoutes.js";
 import callingContactRoutes from "./routes/contactRoutes.js";
 import callRoutes from "./routes/callRoutes.js";
 import callingAnalyticsRoutes from "./routes/callingAnalyticsRoutes.js";
+import callingPromptRoutes from "./routes/callingPromptRoutes.js";
 import { startCallingQueueWorker } from "./services/callingQueueService.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -202,6 +203,7 @@ app.use("/api/campaigns", campaignRoutes);
 app.use("/api/contacts", callingContactRoutes);
 app.use("/api/calls", callRoutes);
 app.use("/api/calling-analytics", callingAnalyticsRoutes);
+app.use("/api/calling-prompts", callingPromptRoutes);
 // ─────────────────────────────────────────────────────────────────
 
 /* ─── OLD EXOTEL CALLING AGENT ROUTES (COMMENTED OUT) ───

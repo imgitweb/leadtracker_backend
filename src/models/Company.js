@@ -14,6 +14,7 @@ const companySchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+
     industry: {
       type: String,
       enum: [
@@ -28,6 +29,7 @@ const companySchema = new mongoose.Schema(
       ],
       default: 'other',
     },
+
     description: {
       type: String,
       default: null,
@@ -42,13 +44,29 @@ const companySchema = new mongoose.Schema(
       enum: ['free', 'pro', 'enterprise'],
       default: 'enterprise',
     },
+    solutions: {
+      type: [String],
+      default: [],
+    },
+    isTrial: {
+      type: Boolean,
+      default: true,
+    },
+    trialDays: {
+      type: Number,
+      default: 15,
+    },
+    trialExpiresAt: {
+      type: Date,
+      default: () => new Date(Date.now() + 15 * 24 * 60 * 60 * 1000), // 15 days free trial
+    },
     planStartDate: {
       type: Date,
       default: Date.now,
     },
     planEndDate: {
       type: Date,
-      default: () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days default
+      default: () => new Date(Date.now() + 15 * 24 * 60 * 60 * 1000), // 15 days trial default
     },
     maxUsers: {
       type: Number,
@@ -93,6 +111,20 @@ companySchema.pre('save', function () {
     this.maxLeads = planLimits.maxLeads;
   }
 });
+
+// Check if company subscription or trial has expired
+companySchema.methods.isExpired = function () {
+  // If not trial and no planEndDate, consider active
+  const now = new Date();
+  if (this.isTrial) {
+    const expireDate = this.trialExpiresAt || this.planEndDate;
+    return !!(expireDate && new Date(expireDate) < now);
+  }
+  if (this.planEndDate) {
+    return new Date(this.planEndDate) < now;
+  }
+  return false;
+};
 
 const Company = mongoose.model('Company', companySchema);
 export default Company;

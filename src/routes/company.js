@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getCompany,
   updateCompany,
+  upgradeCompanyPlan,
   generateApiKey,
   getApiKeys,
   regenerateApiKey,
@@ -19,6 +20,7 @@ router.use(protect);
 router.get('/', getCompany);
 router.get('/modules', getCompanyModules);
 router.put('/', authorize('admin', 'super_admin'), updateCompany);
+router.put('/plan', authorize('admin', 'super_admin'), upgradeCompanyPlan);
 
 // API Keys
 router.post('/api-keys', authorize('admin', 'super_admin'), generateApiKey);

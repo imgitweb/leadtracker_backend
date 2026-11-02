@@ -40,7 +40,7 @@ export const createCampaign = async (req, res) => {
       description: description || "",
       systemPrompt: finalPrompt,
       prompt: finalPrompt,
-      callerId: callerId || process.env.TWILIO_PHONE_NUMBER,
+      callerId: (callerId && callerId !== "+17372508034") ? callerId : (process.env.TWILIO_PHONE_NUMBER || "+17372212163"),
       language: language || "hi-IN",
       voice: voice || "Polly.Aditi",
       maxConcurrentCalls: Number(maxConcurrentCalls) || 2,
@@ -63,7 +63,7 @@ export const createCampaign = async (req, res) => {
           company: companyId,
         }));
 
-        await Contact.insertMany(contactDocs, { ordered: false }).catch(() => {});
+        await Contact.insertMany(contactDocs, { ordered: false }).catch(() => { });
 
         const totalSaved = await Contact.countDocuments({ campaignId: campaign._id });
         campaign.totalContacts = totalSaved;
@@ -243,7 +243,7 @@ export const startCampaign = async (req, res) => {
 
     // Trigger queue worker immediately
     const io = req.app.get("socketio");
-    processCallingQueue(io).catch(() => {});
+    processCallingQueue(io).catch((err) => { console.error("❌ [CampaignController] Error running processCallingQueue:", err.message); });
 
     return sendResponse(res, 200, true, "Campaign started successfully! Calls are being dispatched.", { campaign });
   } catch (error) {
@@ -290,7 +290,7 @@ export const resumeCampaign = async (req, res) => {
     await campaign.save();
 
     const io = req.app.get("socketio");
-    processCallingQueue(io).catch(() => {});
+    processCallingQueue(io).catch(() => { });
 
     return sendResponse(res, 200, true, "Campaign resumed successfully.", { campaign });
   } catch (error) {

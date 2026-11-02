@@ -17,9 +17,11 @@ const auditLogSchema = new mongoose.Schema(
       required: [true, 'Please provide an action'],
       enum: [
         'user_created',
+        'auto_signup_completed',
         'user_updated',
         'user_deleted',
         'user_login',
+        'auto_login',
         'user_logout',
         'user_role_updated',
         'user_module_access_updated',

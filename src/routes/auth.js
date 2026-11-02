@@ -9,12 +9,20 @@ import {
 	getCurrentUser,
 	forgotPassword,
 	resetPassword,
+	sendOtp,
+	verifyOtp,
+	autoSignup,
+	checkUserExists,
 } from '../controllers/authController.js';
 
 const router = express.Router();
 
+router.post('/check-exists', checkUserExists);
 router.post('/register', register);
 router.post('/login',  login);
+router.post('/send-otp', sendOtp);
+router.post('/verify-otp', verifyOtp);
+router.post('/auto-signup', autoSignup);
 router.post('/logout', protect, logout);
 router.post('/refresh-token', refreshToken);
 router.get('/me', protect, getCurrentUser);
