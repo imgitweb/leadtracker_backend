@@ -43,6 +43,44 @@ export const protect = async (req, res, next) => {
       });
     }
 
+    // Check if company subscription or 15-day trial has expired
+    // Super admins and plan upgrade/get endpoints are always allowed
+    const role = (req.user.role || '').toLowerCase();
+    const isSuperAdmin = role === 'super_admin';
+    const isUpgradeEndpoint = (
+      req.baseUrl === '/api/company' && (
+        req.path === '/plan' || req.path === '/plans' || req.path === '/'
+      )
+    );
+
+    if (!isSuperAdmin && !isUpgradeEndpoint && req.user.company) {
+      const company = req.user.company;
+      const isExpired = typeof company.isExpired === 'function'
+        ? company.isExpired()
+        : (
+          company.isTrial
+            ? (company.trialExpiresAt && new Date(company.trialExpiresAt) < new Date())
+            : (company.planEndDate && new Date(company.planEndDate) < new Date())
+        );
+
+      if (isExpired) {
+        return res.status(402).json({
+          success: false,
+          code: 'TRIAL_EXPIRED',
+          message: 'Your 15-day trial or workspace subscription has expired. Please upgrade your plan to continue accessing your CRM tools.',
+          trialExpired: true,
+          company: {
+            _id: company._id,
+            name: company.name,
+            plan: company.plan,
+            isTrial: company.isTrial,
+            trialExpiresAt: company.trialExpiresAt,
+            planEndDate: company.planEndDate,
+          },
+        });
+      }
+    }
+
     next();
   } catch (error) {
     return res.status(401).json({

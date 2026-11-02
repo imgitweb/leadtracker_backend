@@ -21,11 +21,16 @@ router.post("/call-status", handleCallStatus);
 router.post("/recording-status", handleRecordingStatus);
 
 // Frontend configuration check endpoint
-router.get("/config", protect, (req, res) => {
-  res.json({
-    success: true,
-    data: getTwilioConfig(),
-  });
+router.get("/config", protect, async (req, res) => {
+  try {
+    const config = await getTwilioConfig();
+    res.json({
+      success: true,
+      data: config,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
 });
 
 export default router;

@@ -29,16 +29,41 @@ export const getTwilioClient = () => {
   return client;
 };
 
-export const getTwilioConfig = () => {
+export const getTwilioConfig = async () => {
   const sid = (process.env.TWILIO_ACCOUNT_SID || "").trim();
   const token = (process.env.TWILIO_AUTH_TOKEN || "").trim();
   const caller = (process.env.TWILIO_PHONE_NUMBER || "").trim();
 
+  let accountType = "Trial";
+  let balance = "0.0 USD";
+  let isTrialExpired = false;
+
+  const twClient = getTwilioClient();
+  if (twClient) {
+    try {
+      const [acc, bal] = await Promise.all([
+        twClient.api.v2010.accounts(sid).fetch().catch(() => null),
+        twClient.balance.fetch().catch(() => null),
+      ]);
+      if (acc) {
+        accountType = acc.type || "Trial";
+      }
+      if (bal) {
+        balance = `${bal.balance} ${bal.currency}`;
+      }
+    } catch (e) {
+      // Continue gracefully if network/API fails
+    }
+  }
+
   return {
     accountSid: sid || "",
-    authToken: token ? "••••••••" : "",
+    authToken: token ? `${token.substring(0, 4)}••••••••${token.slice(-4)}` : "",
     callerId: caller || "",
     isConfigured: isTwilioConfigured(),
+    accountType,
+    balance,
+    isTrialExpired: false,
   };
 };
 

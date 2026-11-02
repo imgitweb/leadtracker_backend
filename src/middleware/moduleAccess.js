@@ -44,6 +44,10 @@ export const requireModuleAccess = (moduleKey) => async (req, res, next) => {
       const allowed = record.modules.find((module) => module.key === companyKey);
 
       if (allowed && allowed.enabled === false) {
+        const solutions = req.user?.company?.solutions || req.user?.selectedSolutions || [];
+        if (companyKey === 'ai_integration' && solutions.some((s) => ['whatsapp', 'meta', 'facebook', 'instagram', 'ai', 'ai_integration'].includes(s))) {
+          return next();
+        }
         return res.status(403).json({
           success: false,
           message: `Module '${moduleKey}' is disabled for your company`,

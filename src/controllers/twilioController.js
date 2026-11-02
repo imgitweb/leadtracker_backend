@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Call from "../models/Call.js";
 import Contact from "../models/Contact.js";
 import Campaign from "../models/Campaign.js";
@@ -16,14 +17,24 @@ export const handleVoiceWebhook = async (req, res) => {
   const { CallSid } = req.body;
 
   try {
-    const call = await Call.findById(callRecordId).populate("contactId").populate("campaignId");
+    let call = null;
+    if (callRecordId && mongoose.Types.ObjectId.isValid(callRecordId)) {
+      call = await Call.findById(callRecordId).populate("contactId").populate("campaignId");
+    }
+
+    const publicBaseUrl = (process.env.PUBLIC_BASE_URL || process.env.APP_URL || "").replace(/\/+$/, "");
+    const safeCallId = call ? call._id.toString() : (callRecordId || "interactive_call");
+    const actionUrl = `${publicBaseUrl}/api/twilio/process-speech?callRecordId=${safeCallId}`;
 
     if (!call) {
-      console.warn(`Call record not found: ${callRecordId}`);
+      console.warn(`Call record not found in DB for ID: ${callRecordId}. Starting interactive conversational AI flow.`);
+      const initialGreeting = "Namaste ji! Main Cinfy Solutions se baat kar rahi hoon. Kya ek minute baat karne ka samay hoga aapke paas?";
       const twiml = buildConversationalTwiML({
-        speechText: "Namaste. Thank you for answering.",
-        actionUrl: "",
-        isEndCall: true,
+        speechText: initialGreeting,
+        actionUrl,
+        language: "hi-IN",
+        voice: "Polly.Aditi",
+        isEndCall: false,
       });
       res.type("text/xml");
       return res.send(twiml);
@@ -46,12 +57,14 @@ export const handleVoiceWebhook = async (req, res) => {
     const language = campaign?.language || "hi-IN";
     const voice = campaign?.voice || "Polly.Aditi";
 
-    // Formulate natural initial greeting
+    // Formulate natural human telecaller greeting
     let initialGreeting = "";
     if (language.startsWith("hi") || language === "en-IN") {
-      initialGreeting = `Namaste! Kya main ${contactName} ji se baat kar raha hoon?`;
+      const salutation = contactName && contactName !== "Customer" ? `${contactName} ji` : "ji";
+      initialGreeting = `Namaste ${salutation}! Main Cinfy Solutions se baat kar rahi hoon. Kya ek minute baat karne ka samay hoga aapke paas?`;
     } else {
-      initialGreeting = `Hello, am I speaking with ${contactName}?`;
+      const salutation = contactName && contactName !== "Customer" ? ` ${contactName}` : "";
+      initialGreeting = `Hello${salutation}! I am calling from Cinfy Solutions. Do you have a quick minute to speak?`;
     }
 
     // Save initial greeting to transcript
@@ -64,9 +77,6 @@ export const handleVoiceWebhook = async (req, res) => {
       text: initialGreeting,
       language,
     });
-
-    const publicBaseUrl = (process.env.PUBLIC_BASE_URL || process.env.APP_URL || "").replace(/\/+$/, "");
-    const actionUrl = `${publicBaseUrl}/api/twilio/process-speech?callRecordId=${call._id}`;
 
     const twiml = buildConversationalTwiML({
       speechText: initialGreeting,
@@ -99,42 +109,45 @@ export const handleProcessSpeech = async (req, res) => {
   const { SpeechResult } = req.body;
 
   try {
-    const call = await Call.findById(callRecordId).populate("contactId").populate("campaignId");
-
-    if (!call) {
-      res.type("text/xml");
-      return res.send(buildConversationalTwiML({ speechText: "Thank you. Goodbye.", isEndCall: true }));
+    let call = null;
+    if (callRecordId && mongoose.Types.ObjectId.isValid(callRecordId)) {
+      call = await Call.findById(callRecordId).populate("contactId").populate("campaignId");
     }
 
-    const campaign = call.campaignId;
+    const publicBaseUrl = (process.env.PUBLIC_BASE_URL || process.env.APP_URL || "").replace(/\/+$/, "");
+    const safeCallId = call ? call._id.toString() : (callRecordId || "interactive_call");
+    const actionUrl = `${publicBaseUrl}/api/twilio/process-speech?callRecordId=${safeCallId}`;
+
+    const campaign = call?.campaignId;
     const language = campaign?.language || "hi-IN";
     const voice = campaign?.voice || "Polly.Aditi";
-    const contactName = call.contactId?.name || "Customer";
-    const publicBaseUrl = (process.env.PUBLIC_BASE_URL || process.env.APP_URL || "").replace(/\/+$/, "");
-    const actionUrl = `${publicBaseUrl}/api/twilio/process-speech?callRecordId=${call._id}`;
+    const contactName = call?.contactId?.name || "Customer";
 
     // If user said something
     if (SpeechResult && SpeechResult.trim()) {
       console.log(`🗣️ User said: "${SpeechResult}"`);
 
-      // 1. Save user speech to transcript
-      await appendMessageToTranscript({
-        callId: call._id,
-        callSid: call.callSid,
-        campaignId: call.campaignId?._id,
-        contactId: call.contactId?._id,
-        speaker: "User",
-        text: SpeechResult.trim(),
-        language,
-      });
+      let history = [];
+      if (call) {
+        // 1. Save user speech to transcript
+        await appendMessageToTranscript({
+          callId: call._id,
+          callSid: call.callSid,
+          campaignId: call.campaignId?._id,
+          contactId: call.contactId?._id,
+          speaker: "User",
+          text: SpeechResult.trim(),
+          language,
+        });
 
-      // 2. Fetch full conversation history
-      const transcriptDoc = await getTranscriptByCallId(call._id);
-      const history = transcriptDoc?.messages || [];
+        // 2. Fetch full conversation history
+        const transcriptDoc = await getTranscriptByCallId(call._id);
+        history = transcriptDoc?.messages || [];
+      }
 
       // 3. Generate response using OpenAI GPT-3.5 Turbo
       const aiResponse = await generateConversationalResponse({
-        systemPrompt: campaign?.systemPrompt || campaign?.prompt,
+        systemPrompt: campaign?.systemPrompt || campaign?.prompt || "Aap ek polite aur helpful AI Voice Calling Agent hain Cinfy Solutions ki taraf se. Customer se Hindi/Hinglish mein natural tareeqe se baat karein, unke sawalon ka spasht jawab dein aur 1-2 sentence mein answer karein.",
         conversationHistory: history,
         userSpeech: SpeechResult.trim(),
         contactName,
@@ -143,16 +156,18 @@ export const handleProcessSpeech = async (req, res) => {
 
       console.log(`🤖 AI replying: "${aiResponse.reply}" (shouldEndCall: ${aiResponse.shouldEndCall})`);
 
-      // 4. Save AI reply to transcript
-      await appendMessageToTranscript({
-        callId: call._id,
-        callSid: call.callSid,
-        campaignId: call.campaignId?._id,
-        contactId: call.contactId?._id,
-        speaker: "AI Agent",
-        text: aiResponse.reply,
-        language,
-      });
+      if (call) {
+        // 4. Save AI reply to transcript
+        await appendMessageToTranscript({
+          callId: call._id,
+          callSid: call.callSid,
+          campaignId: call.campaignId?._id,
+          contactId: call.contactId?._id,
+          speaker: "AI Agent",
+          text: aiResponse.reply,
+          language,
+        });
+      }
 
       const twiml = buildConversationalTwiML({
         speechText: aiResponse.reply,

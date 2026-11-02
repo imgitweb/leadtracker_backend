@@ -8,6 +8,20 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export class UserService {
+  // Helper to check what solutions the company actually owns
+  static isModuleInCompanyPlan(company, moduleKey) {
+    const solutions = company?.solutions || [];
+    // Core CRM modules always included
+    if (['leads', 'analytics', 'communication_hub'].includes(moduleKey)) return true;
+    if (moduleKey === 'whatsapp') return solutions.includes('whatsapp');
+    if (moduleKey === 'instagram') return solutions.includes('meta') || solutions.includes('instagram');
+    if (moduleKey === 'facebook') return solutions.includes('meta') || solutions.includes('facebook');
+    if (moduleKey === 'calling_agent') return solutions.includes('calling') || solutions.includes('calling_agent');
+    if (moduleKey === 'bulk_email') return solutions.includes('email') || solutions.includes('bulk_email');
+    if (moduleKey === 'ai_integration') return solutions.some((s) => ['whatsapp', 'meta', 'facebook', 'instagram', 'ai', 'ai_integration'].includes(s));
+    return false;
+  }
+
   // Get user profile
   static async getProfile(userId) {
     const user = await User.findById(userId)
@@ -192,22 +206,31 @@ export class UserService {
       throw new Error(`Plan limit reached: Your current plan only allows up to ${company.maxUsers} users. Please upgrade your plan.`);
     }
 
-    // Prepare default or customized moduleAccess
-    const defaultModuleAccess = {
-      whatsapp: true,
-      instagram: true,
-      facebook: true,
-      calling_agent: true,
-      bulk_email: true,
-      communication_hub: true,
-      leads: true,
-      analytics: true,
-      ai_integration: true,
-    };
+    // Prepare moduleAccess: only modules owned by the company can be enabled
+    const allowedKeys = [
+      'whatsapp',
+      'instagram',
+      'facebook',
+      'calling_agent',
+      'bulk_email',
+      'communication_hub',
+      'leads',
+      'analytics',
+      'ai_integration',
+    ];
 
-    const finalModuleAccess = moduleAccess && typeof moduleAccess === 'object'
-      ? { ...defaultModuleAccess, ...moduleAccess }
-      : defaultModuleAccess;
+    const finalModuleAccess = {};
+    for (const key of allowedKeys) {
+      const isOwned = UserService.isModuleInCompanyPlan(company, key);
+      if (!isOwned) {
+        // Company does not have this in plan -> strictly false
+        finalModuleAccess[key] = false;
+      } else if (moduleAccess && typeof moduleAccess === 'object' && Object.prototype.hasOwnProperty.call(moduleAccess, key)) {
+        finalModuleAccess[key] = Boolean(moduleAccess[key]);
+      } else {
+        finalModuleAccess[key] = true;
+      }
+    }
 
     // Create the user
     const user = await User.create({
@@ -244,6 +267,7 @@ export class UserService {
       throw new Error('User not found in your company');
     }
 
+    const company = await Company.findById(companyId);
     const currentAccess = user.moduleAccess ? (user.moduleAccess.toObject ? user.moduleAccess.toObject() : user.moduleAccess) : {};
     
     // Merge new values (convert truthy / falsy booleans safely)
@@ -261,7 +285,11 @@ export class UserService {
 
     const updatedAccess = { ...currentAccess };
     for (const key of allowedKeys) {
-      if (Object.prototype.hasOwnProperty.call(moduleAccessPayload, key)) {
+      const isOwned = UserService.isModuleInCompanyPlan(company, key);
+      if (!isOwned) {
+        // Cannot grant module if company doesn't have it in plan
+        updatedAccess[key] = false;
+      } else if (Object.prototype.hasOwnProperty.call(moduleAccessPayload, key)) {
         updatedAccess[key] = Boolean(moduleAccessPayload[key]);
       } else if (typeof updatedAccess[key] !== 'boolean') {
         updatedAccess[key] = true;

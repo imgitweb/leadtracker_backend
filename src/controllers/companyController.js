@@ -35,6 +35,25 @@ export const updateCompany = async (req, res, next) => {
   }
 };
 
+export const upgradeCompanyPlan = async (req, res, next) => {
+  try {
+    const { plan } = req.body;
+    if (!plan || !['free', 'pro', 'enterprise'].includes(plan.toLowerCase())) {
+      return sendError(res, 400, 'Invalid subscription plan');
+    }
+
+    const company = await CompanyService.upgradePlan(
+      req.user.company._id,
+      plan.toLowerCase(),
+      req.user._id
+    );
+
+    sendResponse(res, 200, true, `Plan upgraded to ${plan.toUpperCase()} successfully`, { company });
+  } catch (error) {
+    sendError(res, 400, error.message, error);
+  }
+};
+
 export const generateApiKey = async (req, res, next) => {
   try {
     const result = await CompanyService.generateApiKey(
